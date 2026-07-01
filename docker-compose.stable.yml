@@ -1,0 +1,21 @@
+services:
+  server:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.server
+    ports:
+      - "4001:3001"
+    restart: unless-stopped
+
+  client:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.client
+      args:
+        NEXT_PUBLIC_SERVER_URL: https://justsaysayforfun.com
+        NEXT_PUBLIC_SOCKET_PATH: /qsignal-stable/socket.io
+    ports:
+      - "4000:3000"
+    depends_on:
+      - server
+    restart: unless-stopped

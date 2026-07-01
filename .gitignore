@@ -1,0 +1,12 @@
+node_modules/
+.next/
+dist/
+.env.local
+*.log
+.DS_Store
+deploy.tar.gz
+qvideochat-deploy.tar.gz
+room-page.tar.gz
+*.tar.gz
+nginx-*.conf
+key/

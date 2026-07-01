@@ -1,0 +1,9 @@
+client/node_modules
+client/.next
+server/node_modules
+server/dist
+node_modules
+.next
+.git
+key
+*.md

@@ -1,0 +1,13 @@
+FROM node:24-alpine AS builder
+WORKDIR /build
+COPY server/package.json server/package-lock.json* ./
+RUN npm ci
+COPY server/ .
+
+FROM node:24-alpine
+WORKDIR /app
+COPY --from=builder /build/node_modules ./node_modules
+COPY --from=builder /build/src ./src
+COPY --from=builder /build/tsconfig.json ./
+EXPOSE 3001
+CMD ["npx", "tsx", "src/index.ts"]
