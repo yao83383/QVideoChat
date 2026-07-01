@@ -5,8 +5,10 @@ dist/
 *.log
 .DS_Store
 deploy.tar.gz
-qvideochat-deploy.tar.gz
-room-page.tar.gz
 *.tar.gz
 nginx-*.conf
 key/
+
+# Large binary files (download via setup.sh)
+client/public/wasm/*.wasm
+client/public/models/*.task
