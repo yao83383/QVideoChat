@@ -7,3 +7,6 @@ node_modules
 .git
 key
 *.md
+client/.env.local
+client/.env
+docker-compose.yml

@@ -9,6 +9,9 @@ deploy.tar.gz
 nginx-*.conf
 key/
 
+# SQLite database
+server/data/
+
 # Large binary files (download via setup.sh)
 client/public/wasm/*.wasm
 client/public/models/*.task

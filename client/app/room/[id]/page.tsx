@@ -8,6 +8,7 @@ import VoiceStatus from "@/components/VoiceStatus";
 import { useFaceMesh } from "@/hooks/useFaceMesh";
 import { usePeer } from "@/hooks/usePeer";
 import { useSocket } from "@/hooks/useSocket";
+import { reportUser } from "@/lib/api";
 import type { MatchEvents, SignalEvents } from "@/hooks/useSocket";
 
 export default function Room() {
@@ -23,17 +24,17 @@ export default function Room() {
 
   const [partnerLeft, setPartnerLeft] = useState(false);
   const [roomReady, setRoomReady] = useState(false);
+  const [friendStatus, setFriendStatus] = useState<"none" | "sent" | "received" | "friends">("none");
+  const [showFriendPrompt, setShowFriendPrompt] = useState(false);
+  const [reported, setReported] = useState(false);
 
-  // Camera + blendshape
   const { blendshapeRef, isLoaded, error: camError, step: camStep, faceFound, start, stop } = useFaceMesh();
   useEffect(() => { start(); return () => stop(); }, []);
 
-  // Bridge refs for socket <-> peer
   const onOfferRef = useRef<(sdp: RTCSessionDescriptionInit) => void>(undefined);
   const onAnswerRef = useRef<(sdp: RTCSessionDescriptionInit) => void>(undefined);
   const onIceRef = useRef<(candidate: RTCIceCandidateInit) => void>(undefined);
 
-  // Signal events: socket receives → calls peer handlers
   const signalEvents: SignalEvents = useMemo(() => ({
     onOffer: (data) => onOfferRef.current?.(data.sdp),
     onAnswer: (data) => onAnswerRef.current?.(data.sdp),
@@ -44,12 +45,28 @@ export default function Room() {
     onWaiting: () => {},
     onFound: () => {},
     onReady: () => setRoomReady(true),
-    onPartnerLeft: () => setPartnerLeft(true),
-  }), []);
+    onPartnerLeft: () => {
+      setPartnerLeft(true);
+      setShowFriendPrompt(true);
+    },
+    onFriendRequest: (data) => {
+      if (data.fromUserId === puid) {
+        setFriendStatus("received");
+        setShowFriendPrompt(true);
+      }
+    },
+    onFriendAccepted: (data) => {
+      if (data.userId === puid) {
+        setFriendStatus("friends");
+      }
+    },
+    onSessionKick: () => {
+      router.push("/");
+    },
+  }), [puid, router]);
 
   const socket = useSocket(matchEvents, signalEvents);
 
-  // Signaling for peer: peer emits → socket sends
   const signaling = useMemo(() => ({
     onOffer: (sdp: RTCSessionDescriptionInit) => { socket.sendOffer(roomId, sdp); },
     onAnswer: (sdp: RTCSessionDescriptionInit) => { socket.sendAnswer(roomId, sdp); },
@@ -58,27 +75,23 @@ export default function Room() {
 
   const peer = usePeer(blendshapeRef, signaling);
 
-  // Wire peer handlers to bridge refs
   useEffect(() => {
     onOfferRef.current = peer.handleIncomingOffer;
     onAnswerRef.current = peer.handleIncomingAnswer;
     onIceRef.current = peer.handleIncomingIce;
   });
 
-  // Step 1: Both join room + setup peer (as non-initiator)
   useEffect(() => {
     if (!socket.isConnected || !isLoaded || peer.isConnecting || peer.isConnected) return;
     socket.joinRoom(roomId, userId);
     peer.initConnection(false);
   }, [socket.isConnected, isLoaded, peer.isConnecting, peer.isConnected, roomId, userId, peer.initConnection]);
 
-  // Step 2: Initiator sends offer after room:ready
   useEffect(() => {
     if (!roomReady || !isInitiator) return;
     peer.startAsInitiator();
   }, [roomReady, isInitiator, peer.startAsInitiator]);
 
-  // Remote audio
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const [audioBlocked, setAudioBlocked] = useState(false);
   useEffect(() => {
@@ -106,6 +119,16 @@ export default function Room() {
     router.push("/");
   };
 
+  const handleAddFriend = () => {
+    socket.sendFriendRequest(userId, uname, puid);
+    setFriendStatus("sent");
+  };
+
+  const handleAcceptFriend = () => {
+    socket.sendFriendAccept(puid, userId);
+    setFriendStatus("friends");
+  };
+
   if (!isLoaded) {
     return (
       <main className="flex min-h-screen flex-col items-center justify-center gap-4">
@@ -113,7 +136,6 @@ export default function Room() {
         <p className="text-neutral-400 text-sm">初始化摄像头...</p>
         {camStep && <p className="text-yellow-400 text-xs">阶段: {camStep}</p>}
         {camError && <p className="text-red-400 text-sm">{camError}</p>}
-        {isLoaded && !faceFound && <p className="text-yellow-400 text-xs">就绪 · 未检测到人脸</p>}
       </main>
     );
   }
@@ -127,6 +149,10 @@ export default function Room() {
       )}
       {peer.error && (
         <p className="text-red-400 text-sm">{peer.error}</p>
+      )}
+
+      {friendStatus === "received" && !partnerLeft && (
+        <p className="rounded-lg bg-green-900/30 px-4 py-2 text-green-400 text-xs">{pname} 想加你为好友</p>
       )}
 
       <div className="flex flex-col sm:flex-row items-center gap-6">
@@ -155,9 +181,66 @@ export default function Room() {
         </button>
       )}
 
+      {peer.isConnected && friendStatus === "none" && (
+        <button
+          onClick={handleAddFriend}
+          className="rounded-lg bg-neutral-800 border border-neutral-700 px-4 py-1.5 text-xs text-neutral-300 hover:border-neutral-500 hover:text-white transition"
+        >
+          + 添加好友
+        </button>
+      )}
+
+      {peer.isConnected && friendStatus === "received" && (
+        <button
+          onClick={handleAcceptFriend}
+          className="rounded-lg bg-green-700 px-4 py-1.5 text-xs text-white hover:bg-green-600"
+        >
+          接受好友请求
+        </button>
+      )}
+
+      {friendStatus === "sent" && (
+        <p className="text-xs text-neutral-500">好友请求已发送</p>
+      )}
+
+      {friendStatus === "friends" && (
+        <p className="text-xs text-green-400">已是好友</p>
+      )}
+
+      {showFriendPrompt && partnerLeft && (
+        <div className="flex items-center gap-3 rounded-lg bg-neutral-800/60 px-4 py-3">
+          <span className="text-xs text-neutral-400">聊得开心吗？</span>
+          {friendStatus === "none" && (
+            <button
+              onClick={handleAddFriend}
+              className="rounded-lg bg-white text-black px-3 py-1 text-xs font-medium hover:bg-neutral-200"
+            >
+              加为好友
+            </button>
+          )}
+          {friendStatus === "sent" && (
+            <span className="text-xs text-green-400">已发送</span>
+          )}
+          {friendStatus === "friends" && (
+            <span className="text-xs text-green-400">已是好友</span>
+          )}
+        </div>
+      )}
+
       <div className="flex gap-4 mt-2">
         <MatchButton label="挂断" variant="secondary" onClick={handleHangup} />
-        <MatchButton label="下一个" onClick={handleNext} disabled={partnerLeft} />
+        <MatchButton label="下一个" onClick={handleNext} />
+        {!reported && (
+          <button
+            onClick={() => { reportUser(puid, roomId, ""); setReported(true); }}
+            className="text-[10px] text-red-600 hover:text-red-400 underline underline-offset-2"
+          >
+            举报
+          </button>
+        )}
+        {reported && (
+          <span className="text-[10px] text-neutral-600">已举报</span>
+        )}
       </div>
     </main>
   );

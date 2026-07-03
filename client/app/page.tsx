@@ -6,31 +6,37 @@ import NameInput from "@/components/NameInput";
 import MatchButton from "@/components/MatchButton";
 import BlendshapeDebug from "@/components/BlendshapeDebug";
 import VrmAvatar from "@/components/VrmAvatar";
+import TagSelector from "@/components/TagSelector";
+import FriendList from "@/components/FriendList";
 import { useFaceMesh } from "@/hooks/useFaceMesh";
 import { useSocket } from "@/hooks/useSocket";
+import { useUser } from "@/hooks/useUser";
 import type { MatchEvents, SignalEvents } from "@/hooks/useSocket";
-
-let globalUserId = "";
-const getUserId = () => {
-  if (!globalUserId) globalUserId = Math.random().toString(36).slice(2, 10);
-  return globalUserId;
-};
 
 export default function Home() {
   const router = useRouter();
-  const userId = useMemo(() => getUserId(), []);
+  const { user, loading: userLoading, createUser } = useUser();
   const [username, setUsername] = useState("");
   const [matchStatus, setMatchStatus] = useState<"idle" | "matching">("idle");
   const [showDebug, setShowDebug] = useState(false);
+  const [showFriends, setShowFriends] = useState(false);
+  const [selectedTags, setSelectedTags] = useState<string[]>([]);
+  const [friendRequest, setFriendRequest] = useState<{ fromUserId: string; fromUsername: string } | null>(null);
+  const [banMsg, setBanMsg] = useState("");
   const usernameRef = useRef(username);
   usernameRef.current = username;
+
+  // Restore username from user state
+  useEffect(() => {
+    if (user?.username && !username) setUsername(user.username);
+  }, [user?.username]);
 
   const matchEvents: MatchEvents = useMemo(
     () => ({
       onWaiting: () => setMatchStatus("matching"),
       onFound: (data) => {
         const params = new URLSearchParams({
-          uid: userId,
+          uid: user?.userId || "",
           uname: usernameRef.current,
           puid: data.partner.userId,
           pname: data.partner.username,
@@ -39,8 +45,15 @@ export default function Home() {
       },
       onPartnerLeft: () => {},
       onReady: () => {},
+      onFriendRequest: (data) => setFriendRequest(data),
+      onFriendAccepted: () => {},
+      onSessionKick: () => {
+        localStorage.removeItem("user");
+        localStorage.removeItem("token");
+        window.location.reload();
+      },
     }),
-    [userId, router],
+    [user?.userId, router],
   );
 
   const signalEvents: SignalEvents = useMemo(
@@ -52,7 +65,7 @@ export default function Home() {
     [],
   );
 
-  const { joinMatch, cancelMatch } = useSocket(matchEvents, signalEvents);
+  const { isConnected, joinMatch, cancelMatch, socketRef } = useSocket(matchEvents, signalEvents);
   const { blendshapeRef, isLoaded, error, step, faceFound, start, stop } = useFaceMesh();
 
   const handleToggleCamera = async () => {
@@ -61,24 +74,87 @@ export default function Home() {
 
   useEffect(() => () => stop(), [stop]);
 
+  const handleMatch = async () => {
+    const name = username.trim();
+    if (!name) return;
+    // Ensure we have a server-side user with token
+    let uid = user?.userId;
+    if (!uid || !user?.token) {
+      try {
+        const newUser = await createUser(name);
+        uid = newUser.userId;
+      } catch (e: any) {
+        setBanMsg(e?.message || "无法连接服务器");
+        return;
+      }
+    }
+    setBanMsg("");
+    const ac = new (window.AudioContext || (window as any).webkitAudioContext)();
+    ac.resume();
+    joinMatch(uid, name, selectedTags);
+    setMatchStatus("matching");
+  };
+
+  if (userLoading) {
+    return (
+      <main className="flex min-h-screen flex-col items-center justify-center">
+        <div className="h-8 w-8 animate-spin rounded-full border-2 border-neutral-600 border-t-white" />
+      </main>
+    );
+  }
+
   return (
     <main className="flex min-h-screen flex-col items-center justify-center gap-8 p-4">
+      <div className="absolute top-4 right-4 flex gap-2 items-center">
+        {user?.isRegistered ? (
+          <>
+            <span className="text-xs text-neutral-500 mr-1">{user.username}</span>
+            <MatchButton label="好友" variant="secondary" onClick={() => setShowFriends(true)} />
+            <MatchButton label="我的" variant="secondary" onClick={() => router.push("/profile")} />
+          </>
+        ) : (
+          <MatchButton label="登录/注册" variant="secondary" onClick={() => router.push("/login")} />
+        )}
+      </div>
+
+      {friendRequest && (
+        <div className="fixed top-4 left-1/2 -translate-x-1/2 z-40 bg-neutral-800 border border-neutral-600 rounded-xl px-4 py-3 shadow-lg flex items-center gap-3">
+          <span className="text-sm text-neutral-200">
+            <span className="font-medium">{friendRequest.fromUsername}</span> 请求加你为好友
+          </span>
+          <button
+            className="rounded-lg bg-white text-black px-3 py-1 text-xs font-medium"
+            onClick={() => {
+              socketRef.current?.emit("friend:accept", {
+                fromUserId: friendRequest.fromUserId,
+                toUserId: user?.userId || "",
+              });
+              setFriendRequest(null);
+            }}
+          >
+            接受
+          </button>
+          <button
+            className="text-xs text-neutral-400 hover:text-white"
+            onClick={() => setFriendRequest(null)}
+          >
+            忽略
+          </button>
+        </div>
+      )}
+
       <h1 className="text-3xl font-bold tracking-tight">QVideoChat</h1>
       <p className="text-neutral-400 text-sm">Q版虚拟形象 · 随机匹配通话</p>
 
       <NameInput value={username} onChange={setUsername} disabled={matchStatus !== "idle"} />
 
+      <TagSelector selected={selectedTags} onChange={setSelectedTags} />
+
       {matchStatus === "idle" && (
         <MatchButton
           label="开始匹配"
           disabled={!username.trim()}
-          onClick={() => {
-            // unlock audio autoplay
-            const ac = new (window.AudioContext || (window as any).webkitAudioContext)();
-            ac.resume();
-            joinMatch(userId, username);
-            setMatchStatus("matching");
-          }}
+          onClick={handleMatch}
         />
       )}
 
@@ -89,7 +165,7 @@ export default function Home() {
           <MatchButton
             label="取消"
             variant="secondary"
-            onClick={() => { cancelMatch(userId); setMatchStatus("idle"); }}
+            onClick={() => { cancelMatch(user?.userId || ""); setMatchStatus("idle"); }}
           />
         </div>
       )}
@@ -103,6 +179,7 @@ export default function Home() {
       />
 
       {error && <p className="text-red-400 text-sm">{error}</p>}
+      {banMsg && <p className="text-red-400 text-sm">{banMsg}</p>}
       {isLoaded && !faceFound && <p className="text-yellow-400 text-xs">追踪就绪 · 未检测到人脸</p>}
       {faceFound && <p className="text-green-400 text-xs">追踪就绪 · 人脸检测中</p>}
       {step && !isLoaded && <p className="text-yellow-400 text-xs">加载中: {step}</p>}
@@ -113,6 +190,12 @@ export default function Home() {
           <VrmAvatar blendshapeRef={blendshapeRef} size={320} label="Q版形象 (本地)" />
         </div>
       )}
+
+      <FriendList
+        isOpen={showFriends}
+        onClose={() => setShowFriends(false)}
+        currentUserId={user?.userId || ""}
+      />
     </main>
   );
 }

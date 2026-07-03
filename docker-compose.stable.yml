@@ -5,6 +5,8 @@ services:
       dockerfile: docker/Dockerfile.server
     ports:
       - "4001:3002"
+    volumes:
+      - server_data:/app/data
     restart: unless-stopped
 
   client:
@@ -20,3 +22,6 @@ services:
     depends_on:
       - server
     restart: unless-stopped
+
+volumes:
+  server_data:

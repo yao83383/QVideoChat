@@ -11,6 +11,9 @@ export interface MatchEvents {
   onFound: (data: { roomId: string; partner: { userId: string; username: string } }) => void;
   onPartnerLeft: () => void;
   onReady: () => void;
+  onFriendRequest?: (data: { fromUserId: string; fromUsername: string }) => void;
+  onFriendAccepted?: (data: { userId: string }) => void;
+  onSessionKick?: (data: { message: string }) => void;
 }
 
 export interface SignalEvents {
@@ -21,13 +24,16 @@ export interface SignalEvents {
 
 export interface UseSocketReturn {
   isConnected: boolean;
-  joinMatch: (userId: string, username: string) => void;
+  socketRef: React.MutableRefObject<Socket | null>;
+  joinMatch: (userId: string, username: string, tags?: string[]) => void;
   cancelMatch: (userId: string) => void;
   joinRoom: (roomId: string, userId: string) => void;
   sendOffer: (roomId: string, sdp: RTCSessionDescriptionInit) => void;
   sendAnswer: (roomId: string, sdp: RTCSessionDescriptionInit) => void;
   sendIce: (roomId: string, candidate: RTCIceCandidateInit) => void;
   leaveRoom: (roomId: string) => void;
+  sendFriendRequest: (fromUserId: string, fromUsername: string, toUserId: string) => void;
+  sendFriendAccept: (fromUserId: string, toUserId: string) => void;
 }
 
 export function useSocket(
@@ -62,6 +68,10 @@ export function useSocket(
     socket.on("signal:answer", (data) => signalEventsRef.current.onAnswer(data));
     socket.on("signal:ice", (data) => signalEventsRef.current.onIce(data));
 
+    socket.on("friend:request", (data) => matchEventsRef.current.onFriendRequest?.(data));
+    socket.on("friend:accepted", (data) => matchEventsRef.current.onFriendAccepted?.(data));
+    socket.on("session:kick", (data) => matchEventsRef.current.onSessionKick?.(data));
+
     socketRef.current = socket;
 
     return () => {
@@ -70,8 +80,8 @@ export function useSocket(
     };
   }, []);
 
-  const joinMatch = useCallback((userId: string, username: string) => {
-    socketRef.current?.emit("match:join", { userId, username });
+  const joinMatch = useCallback((userId: string, username: string, tags?: string[]) => {
+    socketRef.current?.emit("match:join", { userId, username, tags: tags ?? [] });
   }, []);
 
   const cancelMatch = useCallback((userId: string) => {
@@ -98,8 +108,17 @@ export function useSocket(
     socketRef.current?.emit("room:leave", { roomId });
   }, []);
 
+  const sendFriendRequest = useCallback((fromUserId: string, fromUsername: string, toUserId: string) => {
+    socketRef.current?.emit("friend:request", { fromUserId, fromUsername, toUserId });
+  }, []);
+
+  const sendFriendAccept = useCallback((fromUserId: string, toUserId: string) => {
+    socketRef.current?.emit("friend:accept", { fromUserId, toUserId });
+  }, []);
+
   return {
     isConnected,
+    socketRef,
     joinMatch,
     cancelMatch,
     joinRoom,
@@ -107,5 +126,7 @@ export function useSocket(
     sendAnswer,
     sendIce,
     leaveRoom,
+    sendFriendRequest,
+    sendFriendAccept,
   };
 }

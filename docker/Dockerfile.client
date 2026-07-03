@@ -12,6 +12,7 @@ ENV NEXT_PUBLIC_SERVER_URL=${NEXT_PUBLIC_SERVER_URL}
 ENV NEXT_PUBLIC_SOCKET_PATH=${NEXT_PUBLIC_SOCKET_PATH}
 ENV NEXT_PUBLIC_BASE_PATH=${NEXT_PUBLIC_BASE_PATH}
 RUN sed -i "s|basePath: \"/q\"|basePath: \"${NEXT_PUBLIC_BASE_PATH}\"|g" next.config.ts
+RUN rm -f .env.local .env .env.production
 RUN npm run build
 
 FROM node:24-alpine
