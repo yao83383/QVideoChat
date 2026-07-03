@@ -3,6 +3,8 @@
 import { useRef, useState, useCallback, useEffect } from "react";
 import { FaceLandmarker, FilesetResolver } from "@mediapipe/tasks-vision";
 
+const BASE_PATH = process.env.NEXT_PUBLIC_BASE_PATH || "";
+
 export interface BlendshapeFrame {
   timestamp: number;
   values: Record<string, number>;
@@ -12,6 +14,7 @@ export function useFaceMesh() {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const blendshapeRef = useRef<BlendshapeFrame | null>(null);
   const [isLoaded, setIsLoaded] = useState(false);
+  const [isCameraOn, setIsCameraOn] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [step, setStep] = useState("");
   const [faceFound, setFaceFound] = useState(false);
@@ -45,12 +48,12 @@ export function useFaceMesh() {
       videoRef.current = video;
 
       setStep("wasm");
-      const vision = await FilesetResolver.forVisionTasks("/q/wasm");
+      const vision = await FilesetResolver.forVisionTasks(`${BASE_PATH}/wasm`);
 
       setStep("model");
       const landmarker = await FaceLandmarker.createFromOptions(vision, {
         baseOptions: {
-          modelAssetPath: "/q/models/face_landmarker.task",
+          modelAssetPath: `${BASE_PATH}/models/face_landmarker.task`,
           delegate: "CPU",
         },
         runningMode: "VIDEO",
@@ -62,6 +65,7 @@ export function useFaceMesh() {
 
       landmarkerRef.current = landmarker;
       setIsLoaded(true);
+      setIsCameraOn(true);
       setStep("tracking");
       setError(null);
 
@@ -88,13 +92,13 @@ export function useFaceMesh() {
             setFaceFound(false);
           }
         } catch (e: any) {
-          setError(e?.message || String(e) || "帧检测异常");
+          setError(e?.message || (typeof e?.type === "string" ? `${step}: ${e.type}` : String(e || "未知错误")));
         }
         animFrameRef.current = requestAnimationFrame(processFrame);
       };
       processFrame();
     } catch (e) {
-      setError(`${step}: ${e instanceof Error ? e.message : String(e)}`);
+      setError(`${step}: ${e instanceof Error ? e.message : (typeof (e as any)?.type === "string" ? (e as any).type : String(e))}`);
     }
   }, [step]);
 
@@ -107,10 +111,19 @@ export function useFaceMesh() {
     videoRef.current = null;
     blendshapeRef.current = null;
     setIsLoaded(false);
+    setIsCameraOn(false);
     setStep("");
   }, []);
 
   useEffect(() => () => stop(), [stop]);
 
-  return { videoRef, blendshapeRef, isLoaded, error, step, faceFound, start, stop };
+  const toggleCamera = useCallback(() => {
+    if (isLoaded) {
+      stop();
+    } else {
+      start();
+    }
+  }, [isLoaded, start, stop]);
+
+  return { videoRef, blendshapeRef, isLoaded, isCameraOn, error, step, faceFound, start, stop, toggleCamera };
 }

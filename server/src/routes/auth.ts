@@ -5,7 +5,7 @@ export const router = Router();
 
 router.post("/signup", (req: Request, res: Response) => {
   try {
-    const { username, email, password, deviceId } = req.body;
+    const { username, email, password, deviceId, invite } = req.body;
     if (!username || !username.trim() || !email || !password) {
       res.status(400).json({ error: "缺少昵称/邮箱/密码" });
       return;
@@ -14,7 +14,7 @@ router.post("/signup", (req: Request, res: Response) => {
       res.status(400).json({ error: "密码至少6位" });
       return;
     }
-    const result = createRegisteredUser(username.trim(), email, password, deviceId || "");
+    const result = createRegisteredUser(username.trim(), email, password, deviceId || "", invite || "");
     res.json(result);
   } catch (e: any) {
     if (e?.message === "DEVICE_BANNED") {
@@ -66,13 +66,13 @@ router.post("/login", (req: Request, res: Response) => {
 });
 
 router.post("/anonymous", (req: Request, res: Response) => {
-  const { username, deviceId } = req.body;
+  const { username, deviceId, invite } = req.body;
   if (!username || !username.trim()) {
     res.status(400).json({ error: "昵称不能为空" });
     return;
   }
   try {
-    const result = createAnonymousUser(username.trim(), deviceId || "");
+    const result = createAnonymousUser(username.trim(), deviceId || "", invite || "");
     res.json(result);
   } catch (e: any) {
     if (e?.message === "DEVICE_BANNED") {

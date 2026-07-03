@@ -5,6 +5,8 @@ import { useParams, useSearchParams, useRouter } from "next/navigation";
 import VrmAvatar from "@/components/VrmAvatar";
 import MatchButton from "@/components/MatchButton";
 import VoiceStatus from "@/components/VoiceStatus";
+import LoginPrompt from "@/components/LoginPrompt";
+import { getSettings } from "@/components/SettingsModal";
 import { useFaceMesh } from "@/hooks/useFaceMesh";
 import { usePeer } from "@/hooks/usePeer";
 import { useSocket } from "@/hooks/useSocket";
@@ -20,6 +22,7 @@ export default function Room() {
   const uname = sp.get("uname") || "我";
   const puid = sp.get("puid") || "";
   const pname = sp.get("pname") || "对方";
+  const isRegistered = sp.get("reg") === "1";
   const isInitiator = userId < puid;
 
   const [partnerLeft, setPartnerLeft] = useState(false);
@@ -27,9 +30,12 @@ export default function Room() {
   const [friendStatus, setFriendStatus] = useState<"none" | "sent" | "received" | "friends">("none");
   const [showFriendPrompt, setShowFriendPrompt] = useState(false);
   const [reported, setReported] = useState(false);
+  const [showLoginModal, setShowLoginModal] = useState(false);
 
-  const { blendshapeRef, isLoaded, error: camError, step: camStep, faceFound, start, stop } = useFaceMesh();
+  const { blendshapeRef, isLoaded, isCameraOn, error: camError, step: camStep, faceFound, start, stop, toggleCamera } = useFaceMesh();
   useEffect(() => { start(); return () => stop(); }, []);
+  const cameraEverLoaded = useRef(false);
+  useEffect(() => { if (isLoaded) cameraEverLoaded.current = true; }, [isLoaded]);
 
   const onOfferRef = useRef<(sdp: RTCSessionDescriptionInit) => void>(undefined);
   const onAnswerRef = useRef<(sdp: RTCSessionDescriptionInit) => void>(undefined);
@@ -93,18 +99,51 @@ export default function Room() {
   }, [roomReady, isInitiator, peer.startAsInitiator]);
 
   const audioRef = useRef<HTMLAudioElement | null>(null);
-  const [audioBlocked, setAudioBlocked] = useState(false);
+  const [audioBlocked, setAudioBlocked] = useState(true);
+  const audioRetryRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
   useEffect(() => {
-    if (!peer.remoteAudioStream) return;
-    const audio = new Audio();
-    audio.srcObject = peer.remoteAudioStream;
-    audioRef.current = audio;
-    audio.play().then(() => setAudioBlocked(false)).catch(() => setAudioBlocked(true));
-    return () => { audio.srcObject = null; audioRef.current = null; };
+    if (peer.remoteAudioStream) {
+      setAudioBlocked(true);
+      // Clear old retry timer
+      if (audioRetryRef.current) clearInterval(audioRetryRef.current);
+    }
+    return () => {
+      if (audioRef.current) { audioRef.current.srcObject = null; audioRef.current = null; }
+    };
   }, [peer.remoteAudioStream]);
 
   const unlockAudio = () => {
-    audioRef.current?.play().then(() => setAudioBlocked(false)).catch(() => {});
+    const stream = peer.remoteAudioStream;
+    if (!stream) {
+      // No remote audio yet, retry until it arrives
+      if (audioRetryRef.current) clearInterval(audioRetryRef.current);
+      audioRetryRef.current = setInterval(() => {
+        if (peer.remoteAudioStream) {
+          clearInterval(audioRetryRef.current!);
+          tryPlayAudio(peer.remoteAudioStream);
+        }
+      }, 1000);
+      return;
+    }
+    tryPlayAudio(stream);
+  };
+
+  const tryPlayAudio = (stream: MediaStream) => {
+    if (audioRef.current) { audioRef.current.srcObject = null; }
+    const ac = new (window.AudioContext || (window as any).webkitAudioContext)();
+    ac.resume();
+    const audio = new Audio();
+    audio.srcObject = stream;
+    audio.muted = false;
+    audio.volume = 1;
+    audioRef.current = audio;
+    audio.play().then(() => setAudioBlocked(false)).catch((e) => console.log("audio play failed:", e));
+  };
+
+  // Auto-unlock on first tap
+  const handleFirstInteraction = () => {
+    if (audioBlocked && audioRef.current) unlockAudio();
   };
 
   const handleHangup = () => {
@@ -120,16 +159,18 @@ export default function Room() {
   };
 
   const handleAddFriend = () => {
+    if (!isRegistered) { setShowLoginModal(true); return; }
     socket.sendFriendRequest(userId, uname, puid);
     setFriendStatus("sent");
   };
 
   const handleAcceptFriend = () => {
+    if (!isRegistered) { setShowLoginModal(true); return; }
     socket.sendFriendAccept(puid, userId);
     setFriendStatus("friends");
   };
 
-  if (!isLoaded) {
+  if (!isLoaded && !cameraEverLoaded.current) {
     return (
       <main className="flex min-h-screen flex-col items-center justify-center gap-4">
         <div className="h-8 w-8 animate-spin rounded-full border-2 border-neutral-600 border-t-white" />
@@ -141,7 +182,7 @@ export default function Room() {
   }
 
   return (
-    <main className="flex min-h-screen flex-col items-center justify-center gap-6 p-4">
+    <main className="flex min-h-screen flex-col items-center justify-center gap-6 p-4" onClick={handleFirstInteraction}>
       <h1 className="text-xl font-bold tracking-tight">QVideoChat</h1>
 
       {partnerLeft && (
@@ -156,13 +197,24 @@ export default function Room() {
       )}
 
       <div className="flex flex-col sm:flex-row items-center gap-6">
-        <VrmAvatar blendshapeRef={blendshapeRef} size={260} label={`${uname} (你)`} />
-        <VrmAvatar blendshapeRef={peer.remoteBlendshapeRef} size={260} label={`${pname} (对方)`}
-          muted={partnerLeft} />
+        <div className="flex flex-col items-center gap-2">
+          {isCameraOn ? (
+            <VrmAvatar blendshapeRef={blendshapeRef} size={260} />
+          ) : (
+            <div className="rounded-2xl bg-neutral-950 flex items-center justify-center" style={{ width: 260, height: 260 }}>
+              <span className="text-neutral-600 text-5xl">📷</span>
+            </div>
+          )}
+          <VoiceStatus stream={peer.localAudioStream} label={getSettings().showId ? `${uname} (你)` : "匿名用户"} />
+        </div>
+
+        <div className="flex flex-col items-center gap-2">
+          <VrmAvatar blendshapeRef={peer.remoteBlendshapeRef} size={260} muted={partnerLeft} />
+          <VoiceStatus stream={peer.remoteAudioStream} label={`${pname} (对方)`} muted={partnerLeft} />
+        </div>
       </div>
 
       <div className="flex items-center gap-3">
-        <VoiceStatus stream={peer.remoteAudioStream} muted={partnerLeft} />
         <span className={`text-xs ${peer.isConnected ? "text-green-400" : "text-neutral-500"}`}>
           {peer.isConnecting ? "连接中..." : peer.isConnected ? "已连接" : roomReady ? "建立连接..." : "等待对方加入..."}
         </span>
@@ -172,13 +224,39 @@ export default function Room() {
         )}
       </div>
 
+      {cameraEverLoaded.current && (
+        <div className="flex gap-2">
+          <button
+            onClick={toggleCamera}
+            className={`w-9 h-9 rounded-full flex items-center justify-center text-sm transition ${
+              isCameraOn ? "bg-neutral-800 border border-neutral-600 text-neutral-300 hover:bg-neutral-700" : "bg-red-600/30 border border-red-700 text-red-400"
+            }`}
+            title={isCameraOn ? "关闭摄像头" : "打开摄像头"}
+          >
+            {isCameraOn ? "📷" : "📷"}
+          </button>
+          <button
+            onClick={peer.toggleMic}
+            className={`w-9 h-9 rounded-full flex items-center justify-center text-sm transition ${
+              peer.isMicOn ? "bg-neutral-800 border border-neutral-600 text-neutral-300 hover:bg-neutral-700" : "bg-red-600/30 border border-red-700 text-red-400"
+            }`}
+            title={peer.isMicOn ? "关闭麦克风" : "打开麦克风"}
+          >
+            {peer.isMicOn ? "🎙" : "🎙"}
+          </button>
+        </div>
+      )}
+
       {peer.isConnected && audioBlocked && (
         <button
           onClick={unlockAudio}
-          className="rounded-lg bg-green-700 px-4 py-1.5 text-xs text-white hover:bg-green-600"
+          className="rounded-lg bg-green-600 px-5 py-2 text-sm text-white font-medium hover:bg-green-500 animate-pulse"
         >
-          点击启用语音
+          🔈 点击启用语音 {!peer.remoteAudioStream && "(等待音频...)"}
         </button>
+      )}
+      {peer.isConnected && !audioBlocked && (
+        <p className="text-xs text-green-400/60">语音已连接</p>
       )}
 
       {peer.isConnected && friendStatus === "none" && (
@@ -242,6 +320,8 @@ export default function Room() {
           <span className="text-[10px] text-neutral-600">已举报</span>
         )}
       </div>
+
+      <LoginPrompt show={showLoginModal} onClose={() => setShowLoginModal(false)} />
     </main>
   );
 }

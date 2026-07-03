@@ -31,6 +31,7 @@ function initTables(db: Database.Database) {
       passwordHash TEXT,
       token       TEXT,
       deviceId    TEXT NOT NULL DEFAULT '',
+      referredBy  TEXT NOT NULL DEFAULT '',
       avatarOutfit TEXT DEFAULT 'default',
       matchCount   INTEGER DEFAULT 0,
       totalDuration INTEGER DEFAULT 0,
@@ -94,6 +95,7 @@ function initTables(db: Database.Database) {
 
   // Add deviceId column if missing (migration for existing DBs)
   try { db.exec("ALTER TABLE users ADD COLUMN deviceId TEXT NOT NULL DEFAULT ''"); } catch {}
+  try { db.exec("ALTER TABLE users ADD COLUMN referredBy TEXT NOT NULL DEFAULT ''"); } catch {}
 
   seedTags(db);
 }
@@ -125,13 +127,11 @@ function seedTags(db: Database.Database) {
 
 // --- User helpers ---
 
-export function createAnonymousUser(username: string, deviceId = ""): { userId: string; token: string } {
+export function createAnonymousUser(username: string, deviceId = "", referredBy = ""): { userId: string; token: string } {
   const d = getDb();
-  // Check if this device is banned
   if (deviceId && isDeviceBanned(deviceId)) {
     throw new Error("DEVICE_BANNED");
   }
-  // Reuse existing anonymous user for this device
   if (deviceId) {
     const existing = d.prepare(
       "SELECT userId FROM users WHERE deviceId=? AND isRegistered=0 LIMIT 1",
@@ -144,8 +144,8 @@ export function createAnonymousUser(username: string, deviceId = ""): { userId: 
   }
   const userId = crypto.randomUUID().slice(0, 12);
   const token = crypto.randomBytes(16).toString("hex");
-  d.prepare("INSERT INTO users (userId, username, token, deviceId, createdAt) VALUES (?, ?, ?, ?, ?)").run(
-    userId, username, token, deviceId, Date.now(),
+  d.prepare("INSERT INTO users (userId, username, token, deviceId, referredBy, createdAt) VALUES (?, ?, ?, ?, ?, ?)").run(
+    userId, username, token, deviceId, referredBy, Date.now(),
   );
   return { userId, token };
 }
@@ -166,7 +166,7 @@ export function registerUser(userId: string, email: string, password: string): s
   return token;
 }
 
-export function createRegisteredUser(username: string, email: string, password: string, deviceId = ""): { userId: string; token: string } {
+export function createRegisteredUser(username: string, email: string, password: string, deviceId = "", referredBy = ""): { userId: string; token: string } {
   const d = getDb();
   if (deviceId && isDeviceBanned(deviceId)) {
     throw new Error("DEVICE_BANNED");
@@ -180,8 +180,8 @@ export function createRegisteredUser(username: string, email: string, password: 
   const token = crypto.randomBytes(16).toString("hex");
 
   d.prepare(
-    "INSERT INTO users (userId, username, email, passwordHash, token, deviceId, isRegistered, createdAt) VALUES (?, ?, ?, ?, ?, ?, 1, ?)",
-  ).run(userId, username, email, `${salt}:${hash}`, token, deviceId, Date.now());
+    "INSERT INTO users (userId, username, email, passwordHash, token, deviceId, referredBy, isRegistered, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?)",
+  ).run(userId, username, email, `${salt}:${hash}`, token, deviceId, referredBy, Date.now());
 
   return { userId, token };
 }
@@ -324,6 +324,15 @@ export function getUserIdsByDevice(deviceId: string): string[] {
   const d = getDb();
   const rows = d.prepare("SELECT userId FROM users WHERE deviceId=?").all(deviceId) as any[];
   return rows.map((r: any) => r.userId);
+}
+
+// --- Referral ---
+
+export function getReferralStats(userId: string) {
+  const d = getDb();
+  const referred = d.prepare("SELECT userId, username, createdAt FROM users WHERE referredBy=? AND isRegistered=1").all(userId) as any[];
+  const referrer = d.prepare("SELECT userId, username FROM users WHERE userId=(SELECT referredBy FROM users WHERE userId=?)").get(userId) as any;
+  return { referred, referrer: referrer || null };
 }
 
 export function closeDb() {

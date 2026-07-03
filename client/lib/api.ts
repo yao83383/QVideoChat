@@ -47,10 +47,10 @@ export async function createAnonymous(username: string) {
   return data;
 }
 
-export async function signup(username: string, email: string, password: string) {
+export async function signup(username: string, email: string, password: string, inviteCode = "") {
   const data = await request<{ userId: string; token: string }>("/api/auth/signup", {
     method: "POST",
-    body: JSON.stringify({ username, email, password, deviceId: getDeviceId() }),
+    body: JSON.stringify({ username, email, password, deviceId: getDeviceId(), invite: inviteCode }),
   });
   setToken(data.token);
   return data;
@@ -140,6 +140,10 @@ export async function getMatchHistory() {
 
 export async function getUserStats() {
   return request<any>("/api/history/stats");
+}
+
+export async function getReferral() {
+  return request<any>("/api/users/referral");
 }
 
 export { getToken };

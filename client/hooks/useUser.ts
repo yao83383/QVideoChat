@@ -89,8 +89,8 @@ export function useUser() {
     setUser(u);
   }, [user]);
 
-  const doSignup = useCallback(async (username: string, email: string, password: string) => {
-    const data = await api.signup(username, email, password);
+  const doSignup = useCallback(async (username: string, email: string, password: string, inviteCode = "") => {
+    const data = await api.signup(username, email, password, inviteCode);
     const u: UserState = { userId: data.userId, username, isRegistered: true, token: data.token };
     localStorage.setItem("user", JSON.stringify({ userId: u.userId, username, isRegistered: true }));
     setUser(u);

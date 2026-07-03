@@ -12,6 +12,7 @@ export default function ProfilePage() {
   const [history, setHistory] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [needLogin, setNeedLogin] = useState(false);
+  const [referral, setReferral] = useState<any>(null);
 
   useEffect(() => {
     if (!api.isLoggedIn()) {
@@ -22,9 +23,11 @@ export default function ProfilePage() {
     Promise.all([
       api.getUserStats().catch(() => null),
       api.getMatchHistory().catch(() => []),
-    ]).then(([s, h]) => {
+      api.getReferral().catch(() => null),
+    ]).then(([s, h, r]) => {
       setStats(s);
       setHistory(h);
+      setReferral(r);
       setLoading(false);
     });
   }, [router]);
@@ -103,6 +106,37 @@ export default function ProfilePage() {
           </div>
           <p className="text-sm text-neutral-200 mt-2 font-medium">{stats.username}</p>
           <p className="text-xs text-neutral-500">加入于 {stats.createdAt ? formatDate(stats.createdAt) : "-"}</p>
+          {stats.userId && (
+            <p className="text-[10px] text-neutral-600 mt-1">
+              邀请码: {stats.userId.slice(0, 8)} &middot;
+              <button
+                onClick={() => navigator.clipboard.writeText(`${window.location.origin}/q-dev/login?invite=${stats.userId.slice(0, 8)}`)}
+                className="text-blue-500 hover:text-blue-400 ml-1"
+              >
+                复制邀请链接
+              </button>
+            </p>
+          )}
+        </div>
+      )}
+
+      {referral && referral.referrer && (
+        <div className="rounded-lg bg-neutral-800/40 px-4 py-2 text-xs text-neutral-400">
+          邀请人: <span className="text-neutral-200">{referral.referrer.username}</span>
+        </div>
+      )}
+
+      {referral && referral.referred && referral.referred.length > 0 && (
+        <div className="w-full max-w-sm">
+          <h3 className="text-xs text-neutral-400 mb-2">已邀请 ({referral.referred.length})</h3>
+          <div className="flex flex-col gap-1">
+            {referral.referred.map((r: any) => (
+              <div key={r.userId} className="flex items-center justify-between text-xs text-neutral-500 px-2">
+                <span>{r.username}</span>
+                <span>{formatDate(r.createdAt)}</span>
+              </div>
+            ))}
+          </div>
         </div>
       )}
 

@@ -31,6 +31,11 @@ export function addAudioTrack(pc: RTCPeerConnection, stream: MediaStream): void 
   stream.getAudioTracks().forEach((track) => {
     pc.addTrack(track, stream);
   });
+  pc.getTransceivers().forEach((t) => {
+    if (t.receiver.track.kind === "audio") {
+      t.direction = "sendrecv";
+    }
+  });
 }
 
 export function onRemoteStream(
@@ -38,9 +43,9 @@ export function onRemoteStream(
   callback: (stream: MediaStream) => void,
 ): void {
   pc.ontrack = (event) => {
-    if (event.streams[0]) {
-      callback(event.streams[0]);
-    }
+    console.log("[webrtc] ontrack kind=", event.track.kind, "streams=", event.streams.length);
+    const stream = event.streams[0] || new MediaStream([event.track]);
+    callback(stream);
   };
 }
 
@@ -56,7 +61,7 @@ export function onIceCandidate(
 }
 
 export async function createOffer(pc: RTCPeerConnection): Promise<RTCSessionDescriptionInit> {
-  const offer = await pc.createOffer();
+  const offer = await pc.createOffer({ offerToReceiveAudio: true });
   await pc.setLocalDescription(offer);
   return pc.localDescription!.toJSON();
 }

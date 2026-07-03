@@ -8,6 +8,8 @@ import BlendshapeDebug from "@/components/BlendshapeDebug";
 import VrmAvatar from "@/components/VrmAvatar";
 import TagSelector from "@/components/TagSelector";
 import FriendList from "@/components/FriendList";
+import LoginPrompt from "@/components/LoginPrompt";
+import SettingsModal, { getSettings } from "@/components/SettingsModal";
 import { useFaceMesh } from "@/hooks/useFaceMesh";
 import { useSocket } from "@/hooks/useSocket";
 import { useUser } from "@/hooks/useUser";
@@ -23,6 +25,8 @@ export default function Home() {
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
   const [friendRequest, setFriendRequest] = useState<{ fromUserId: string; fromUsername: string } | null>(null);
   const [banMsg, setBanMsg] = useState("");
+  const [showLoginModal, setShowLoginModal] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
   const usernameRef = useRef(username);
   usernameRef.current = username;
 
@@ -40,6 +44,7 @@ export default function Home() {
           uname: usernameRef.current,
           puid: data.partner.userId,
           pname: data.partner.username,
+          reg: user?.isRegistered ? "1" : "0",
         });
         router.push(`/room/${data.roomId}?${params.toString()}`);
       },
@@ -66,10 +71,11 @@ export default function Home() {
   );
 
   const { isConnected, joinMatch, cancelMatch, socketRef } = useSocket(matchEvents, signalEvents);
-  const { blendshapeRef, isLoaded, error, step, faceFound, start, stop } = useFaceMesh();
+  const { blendshapeRef, isLoaded, isCameraOn, error, step, faceFound, start, stop, toggleCamera } = useFaceMesh();
 
   const handleToggleCamera = async () => {
-    if (isLoaded) { stop(); setShowDebug(false); } else { await start(); setShowDebug(true); }
+    toggleCamera();
+    setShowDebug(isCameraOn ? false : !showDebug);
   };
 
   useEffect(() => () => stop(), [stop]);
@@ -106,6 +112,7 @@ export default function Home() {
   return (
     <main className="flex min-h-screen flex-col items-center justify-center gap-8 p-4">
       <div className="absolute top-4 right-4 flex gap-2 items-center">
+        <MatchButton label="⚙" variant="secondary" onClick={() => setShowSettings(true)} />
         {user?.isRegistered ? (
           <>
             <span className="text-xs text-neutral-500 mr-1">{user.username}</span>
@@ -125,6 +132,7 @@ export default function Home() {
           <button
             className="rounded-lg bg-white text-black px-3 py-1 text-xs font-medium"
             onClick={() => {
+              if (!user?.isRegistered) { setShowLoginModal(true); return; }
               socketRef.current?.emit("friend:accept", {
                 fromUserId: friendRequest.fromUserId,
                 toUserId: user?.userId || "",
@@ -173,7 +181,7 @@ export default function Home() {
       <hr className="w-64 border-neutral-800" />
 
       <MatchButton
-        label={isLoaded ? "关闭摄像头" : "测试: 打开摄像头"}
+        label={isLoaded ? "📷 关闭" : "📷 摄像头"}
         variant="secondary"
         onClick={handleToggleCamera}
       />
@@ -196,6 +204,9 @@ export default function Home() {
         onClose={() => setShowFriends(false)}
         currentUserId={user?.userId || ""}
       />
+
+      <LoginPrompt show={showLoginModal} onClose={() => setShowLoginModal(false)} />
+      <SettingsModal show={showSettings} onClose={() => setShowSettings(false)} />
     </main>
   );
 }

@@ -5,9 +5,10 @@ import { useRef, useEffect } from "react";
 interface Props {
   stream: MediaStream | null;
   muted?: boolean;
+  label?: string;
 }
 
-export default function VoiceStatus({ stream, muted }: Props) {
+export default function VoiceStatus({ stream, muted, label }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
   const rafRef = useRef<number>(0);
@@ -19,6 +20,7 @@ export default function VoiceStatus({ stream, muted }: Props) {
     const source = ctx.createMediaStreamSource(stream);
     const analyser = ctx.createAnalyser();
     analyser.fftSize = 64;
+    analyser.smoothingTimeConstant = 0.4;
     source.connect(analyser);
     analyserRef.current = analyser;
 
@@ -37,10 +39,26 @@ export default function VoiceStatus({ stream, muted }: Props) {
       if (!ctx2d) return;
 
       ctx2d.clearRect(0, 0, canvas.width, canvas.height);
-      ctx2d.fillStyle = muted ? "#ef4444" : level > 0.3 ? "#4ade80" : "#525252";
-      ctx2d.beginPath();
-      ctx2d.arc(canvas.width / 2, canvas.height / 2, 6 + level * 4, 0, Math.PI * 2);
-      ctx2d.fill();
+
+      const barCount = 5;
+      const barW = 4;
+      const gap = 3;
+      const totalW = barCount * barW + (barCount - 1) * gap;
+      const startX = (canvas.width - totalW) / 2;
+      const maxH = canvas.height - 4;
+
+      for (let i = 0; i < barCount; i++) {
+        const h = Math.max(2, maxH * level * (0.4 + Math.random() * 0.6));
+        const y = (canvas.height - h) / 2;
+        ctx2d.fillStyle = muted
+          ? "#ef4444"
+          : level > 0.15
+          ? "#4ade80"
+          : "#3f3f46";
+        ctx2d.beginPath();
+        ctx2d.roundRect(startX + i * (barW + gap), y, barW, h, 2);
+        ctx2d.fill();
+      }
     };
     draw();
 
@@ -51,11 +69,14 @@ export default function VoiceStatus({ stream, muted }: Props) {
   }, [stream, muted]);
 
   return (
-    <canvas
-      ref={canvasRef}
-      width={24}
-      height={24}
-      className="shrink-0"
-    />
+    <div className="flex items-center gap-1.5">
+      <canvas
+        ref={canvasRef}
+        width={40}
+        height={16}
+        className="shrink-0"
+      />
+      {label && <span className="text-[10px] text-neutral-500">{label}</span>}
+    </div>
   );
 }

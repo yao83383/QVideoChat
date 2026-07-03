@@ -1,11 +1,13 @@
 "use client";
 
-import { useState } from "react";
-import { useRouter } from "next/navigation";
+import { Suspense, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useUser } from "@/hooks/useUser";
 
-export default function LoginPage() {
+function LoginForm() {
   const router = useRouter();
+  const sp = useSearchParams();
+  const inviteCode = sp.get("invite") || "";
   const { user, doLogin, doSignup } = useUser();
   const [tab, setTab] = useState<"login" | "register">("login");
   const [username, setUsername] = useState("");
@@ -24,7 +26,7 @@ export default function LoginPage() {
     setLoading(true);
     try {
       if (tab === "register") {
-        await doSignup(username.trim(), email, password);
+        await doSignup(username.trim(), email, password, inviteCode);
       } else {
         await doLogin(email, password);
       }
@@ -108,7 +110,22 @@ export default function LoginPage() {
             : "登录后同步你的好友和数据"
           }
         </p>
+        {inviteCode && tab === "register" && (
+          <p className="text-xs text-green-500/70 text-center">通过好友邀请注册 &middot; {inviteCode}</p>
+        )}
       </form>
     </main>
+  );
+}
+
+export default function LoginPage() {
+  return (
+    <Suspense fallback={
+      <main className="flex min-h-screen flex-col items-center justify-center">
+        <div className="h-8 w-8 animate-spin rounded-full border-2 border-neutral-600 border-t-white" />
+      </main>
+    }>
+      <LoginForm />
+    </Suspense>
   );
 }
