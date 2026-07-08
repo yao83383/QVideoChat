@@ -20,6 +20,7 @@ interface Props {
   label?: string;
   muted?: boolean;
   isSpeaking?: boolean;
+  className?: string;
 }
 
 export default function VrmAvatar({
@@ -28,6 +29,7 @@ export default function VrmAvatar({
   label,
   muted = false,
   isSpeaking = false,
+  className = "",
 }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const vrmRef = useRef<VRM | null>(null);
@@ -86,10 +88,10 @@ export default function VrmAvatar({
   const glowClass = isSpeaking ? "ring-2 ring-green-400/60" : "";
 
   return (
-    <div className="flex flex-col items-center gap-2">
+    <div className={`flex flex-col items-center gap-2 ${className}`}>
       <div
         className={`relative overflow-hidden rounded-2xl bg-neutral-950 ${glowClass}`}
-        style={{ width: size, height: size }}
+        style={size > 0 ? { width: size, height: size } : { width: "100%", height: "100%" }}
       >
         <canvas ref={canvasRef} className="h-full w-full" />
         {muted && (
