@@ -14,11 +14,9 @@ type AIPipeline = any;
 const TRANSLATE_MODELS: Record<string, string> = {
   'zh->en': 'Xenova/opus-mt-zh-en',
   'en->zh': 'Xenova/opus-mt-en-zh',
-  'zh->ja': 'Xenova/opus-mt-zh-ja',
-  'ja->zh': 'Xenova/opus-mt-ja-zh',
-  'en->ja': 'Xenova/opus-mt-en-ja',
   'ja->en': 'Xenova/opus-mt-ja-en',
-  // ko models: may not exist; use en as pivot
+  'en->ja': 'Xenova/opus-mt-en-jap',
+  'ko->en': 'Xenova/opus-mt-ko-en',
 };
 
 // Use English as pivot for language pairs without a direct model.

@@ -55,6 +55,7 @@ export default function RoomClient() {
   const [sourceLang, setSourceLang] = useState(() => loadPref("qv_sl", "zh"));
   const [targetLang, setTargetLang] = useState(() => loadPref("qv_tl", "en"));
   const [subtitleEnabled, setSubtitleEnabled] = useState(false);
+  const [translating, setTranslating] = useState(false);
 
   const { blendshapeRef, isLoaded, isCameraOn, error: camError, step: camStep, faceFound, start, stop, toggleCamera } = useFaceMesh();
   useEffect(() => { start(); return () => stop(); }, []);
@@ -199,10 +200,9 @@ export default function RoomClient() {
     const engine = createWebSpeechASR(
       sourceLang,
       (result) => {
-        // Show source text immediately — don't wait for translation
         setMySourceText(result.text);
 
-        // Send source text to peer immediately via DataChannel
+        // Send source text to peer immediately
         peer.sendTranslation({
           text: result.text,
           sourceText: result.text,
@@ -210,14 +210,16 @@ export default function RoomClient() {
           targetLang,
         });
 
-        // Translate in background — fire and forget
+        // Start translation
+        setTranslating(true);
         translateText(result.text, sourceLang, targetLang)
           .then((tr) => {
             setMyTranslatedText(tr.translatedText);
+            setTranslating(false);
           })
           .catch(() => {
-            // NLLB-200 not available yet (downloading/failed) — just show source
-            setMyTranslatedText(null);
+            console.warn("[translate] failed for:", result.text);
+            setTranslating(false);
           });
       },
       (err) => console.warn("[asr]", err),
@@ -312,10 +314,13 @@ export default function RoomClient() {
           <VoiceStatus stream={peer.localAudioStream} label={getSettings().showId ? `${uname} (你)` : "匿名用户"} />
 
           {/* My speech subtitle */}
-          {subtitleEnabled && (mySourceText || myTranslatedText) && (
+          {subtitleEnabled && (mySourceText || myTranslatedText || translating) && (
             <div className="w-full rounded-lg bg-black/50 border border-white/10 px-3 py-2 text-center max-h-20 overflow-y-auto">
               {mySourceText && (
                 <p className="text-white/70 text-[11px] leading-snug break-words">{mySourceText}</p>
+              )}
+              {translating && !myTranslatedText && (
+                <p className="text-white/30 text-[10px] italic">翻译中...</p>
               )}
               {myTranslatedText && (
                 <p className="text-green-400 text-[11px] leading-snug break-words">{myTranslatedText}</p>
