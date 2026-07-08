@@ -82,6 +82,7 @@ export default function Home() {
   useEffect(() => () => stop(), [stop]);
 
   const handleMatch = async () => {
+    if (!isConnected) return;
     const name = username.trim();
     if (!name) return;
     // Ensure we have a server-side user with token
@@ -113,6 +114,7 @@ export default function Home() {
   return (
     <main className="flex min-h-screen flex-col items-center justify-center gap-8 p-4">
       <div className="absolute top-4 right-4 flex gap-2 items-center">
+        <span className={`w-2 h-2 rounded-full ${isConnected ? "bg-green-500" : "bg-red-500"}`} title={isConnected ? "已连接服务器" : "未连接服务器"} />
         <MatchButton label="⚙" variant="secondary" onClick={() => setShowSettings(true)} />
         {user?.isRegistered ? (
           <>
@@ -155,6 +157,13 @@ export default function Home() {
       <h1 className="text-3xl font-bold tracking-tight">QVideoChat</h1>
       <p className="text-neutral-400 text-sm">Q版虚拟形象 · 随机匹配通话</p>
       <p className="text-neutral-600 text-[10px]">v{process.env.NEXT_PUBLIC_APP_VERSION || "0.0.0"}</p>
+
+      {!isConnected && matchStatus === "idle" && (
+        <div className="flex items-center gap-2 rounded-full bg-red-900/20 border border-red-800/50 px-3 py-1">
+          <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
+          <span className="text-xs text-red-400">服务器未连接</span>
+        </div>
+      )}
 
       <NameInput value={username} onChange={setUsername} disabled={matchStatus !== "idle"} />
 
