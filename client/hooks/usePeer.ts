@@ -12,6 +12,7 @@ interface SignalingEvents {
 
 export interface TranslationMessage {
   text: string;
+  sourceText?: string;
   sourceLang: string;
   targetLang: string;
 }
@@ -92,9 +93,10 @@ export function usePeer(
     dc.onmessage = (event) => {
       try {
         const data = JSON.parse(event.data);
-        if (data.text) {
+        if (data.text || data.st) {
           remoteTranslationRef.current = {
-            text: data.text,
+            text: data.text || "",
+            sourceText: data.st || "",
             sourceLang: data.sl || "",
             targetLang: data.tl || "",
           };
@@ -117,6 +119,7 @@ export function usePeer(
     if (translateDcRef.current?.readyState === "open") {
       translateDcRef.current.send(JSON.stringify({
         text: msg.text,
+        st: msg.sourceText || "",
         sl: msg.sourceLang,
         tl: msg.targetLang,
       }));

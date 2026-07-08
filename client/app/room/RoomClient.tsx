@@ -194,41 +194,48 @@ export default function RoomClient() {
 
   // Web Speech API → translate → display + send to peer
   useEffect(() => {
-    if (!subtitleEnabled || !peer.isConnected || !peer.isMicOn) return;
+    if (!subtitleEnabled || !peer.isConnected) return;
 
     const engine = createWebSpeechASR(
       sourceLang,
       (result) => {
+        // Show source text immediately — don't wait for translation
         setMySourceText(result.text);
-        // Translate in background — NLLB-200 is heavy, don't block UI
+
+        // Send source text to peer immediately via DataChannel
+        peer.sendTranslation({
+          text: result.text,
+          sourceText: result.text,
+          sourceLang,
+          targetLang,
+        });
+
+        // Translate in background — fire and forget
         translateText(result.text, sourceLang, targetLang)
           .then((tr) => {
             setMyTranslatedText(tr.translatedText);
-            peer.sendTranslation({
-              text: tr.translatedText,
-              sourceLang,
-              targetLang,
-            });
           })
-          .catch((e) => console.warn("[translate]", e));
+          .catch(() => {
+            // NLLB-200 not available yet (downloading/failed) — just show source
+            setMyTranslatedText(null);
+          });
       },
       (err) => console.warn("[asr]", err),
     );
 
     if (engine) engine.start();
     return () => engine?.stop();
-  }, [subtitleEnabled, peer.isConnected, peer.isMicOn, sourceLang, targetLang]);
+  }, [subtitleEnabled, peer.isConnected, sourceLang, targetLang, peer.sendTranslation]);
 
   // Receive peer translations via DataChannel
   useEffect(() => {
     if (!subtitleEnabled) return;
     const interval = setInterval(() => {
       const msg = peer.remoteTranslationRef.current;
-      if (msg && msg.text) {
-        setPeerTranslatedText(msg.text);
-        // Clear after reading so it doesn't keep re-rendering
-        peer.remoteTranslationRef.current = null;
-      }
+      if (!msg) return;
+      if (msg.sourceText) setPeerSourceText(msg.sourceText);
+      if (msg.text) setPeerTranslatedText(msg.text);
+      peer.remoteTranslationRef.current = null;
     }, 200);
     return () => clearInterval(interval);
   }, [subtitleEnabled]);
@@ -305,14 +312,14 @@ export default function RoomClient() {
           <VoiceStatus stream={peer.localAudioStream} label={getSettings().showId ? `${uname} (你)` : "匿名用户"} />
 
           {/* My speech subtitle */}
-          {subtitleEnabled && myTranslatedText && (
-            <div className="w-full rounded-lg bg-neutral-900/80 border border-neutral-800 px-3 py-2 text-center">
+          {subtitleEnabled && (mySourceText || myTranslatedText) && (
+            <div className="w-full rounded-lg bg-black/50 border border-white/10 px-3 py-2 text-center max-h-20 overflow-y-auto">
               {mySourceText && (
-                <p className="text-neutral-400 text-[11px] leading-snug break-words">{mySourceText}</p>
+                <p className="text-white/70 text-[11px] leading-snug break-words">{mySourceText}</p>
               )}
-              <p className="text-green-400 text-[11px] leading-snug break-words">
-                {myTranslatedText}
-              </p>
+              {myTranslatedText && (
+                <p className="text-green-400 text-[11px] leading-snug break-words">{myTranslatedText}</p>
+              )}
             </div>
           )}
         </div>
@@ -323,14 +330,14 @@ export default function RoomClient() {
           <VoiceStatus stream={peer.remoteAudioStream} label={`${pname} (对方)`} muted={partnerLeft} />
 
           {/* Partner speech subtitle */}
-          {subtitleEnabled && peerTranslatedText && (
-            <div className="w-full rounded-lg bg-neutral-900/80 border border-neutral-800 px-3 py-2 text-center">
+          {subtitleEnabled && (peerSourceText || peerTranslatedText) && (
+            <div className="w-full rounded-lg bg-black/50 border border-white/10 px-3 py-2 text-center max-h-20 overflow-y-auto">
               {peerSourceText && (
-                <p className="text-neutral-400 text-[11px] leading-snug break-words">{peerSourceText}</p>
+                <p className="text-white/70 text-[11px] leading-snug break-words">{peerSourceText}</p>
               )}
-              <p className="text-green-400 text-[11px] leading-snug break-words">
-                {peerTranslatedText}
-              </p>
+              {peerTranslatedText && (
+                <p className="text-green-400 text-[11px] leading-snug break-words">{peerTranslatedText}</p>
+              )}
             </div>
           )}
         </div>
