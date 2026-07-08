@@ -1,52 +1,68 @@
-# QVideoChat - 稳定版 v1.0
+# QVideoChat v1.2.0 Roadmap — App化 + 客户端AI
 
-Q版虚拟形象 · 随机匹配视频通话
+## 版本目标
 
-## 核心功能
-- 摄像头 → MediaPipe 面部追踪 → 52 blendshape 系数
-- 系数通过 WebRTC DataChannel 传输（不传原始画面，隐私零泄露）
-- 对方 Q版 3D 形象被实时表情驱动
-- 音频通过 WebRTC AudioTrack 传输
-- 国内 TURN 中继保证跨网穿透
+将现有 H5 Web 应用改造为 **全平台 App（iOS/Android/Desktop）**，AI 模型（ASR+翻译）跟随安装包分发，在用户设备本地完成推理，服务器零 AI 成本。
 
-## 技术栈
-| 层 | 技术 |
-|----|------|
-| 前端 | Next.js 15 + Three.js |
-| 面部追踪 | MediaPipe FaceLandmarker (tasks-vision) |
-| 实时通信 | WebRTC (DataChannel + AudioTrack) |
-| 信令 | Socket.IO |
-| TURN | coturn |
-| 部署 | pm2 + Docker (稳定版) |
+## 技术架构
 
-## 快速启动
-
-### 本地开发
-```bash
-# 信令服务器
-cd server && npm install && npm run dev    # → :3001
-# 前端
-cd client && npm install && npm run dev    # → :3000 (/q)
+```
+┌─────────────────────────────────────────┐
+│        Capacitor Shell (Native)          │
+│  ┌───────────────────────────────────┐  │
+│  │   Next.js (output: export, SPA)   │  │
+│  │  ┌──────────┐  ┌───────────────┐  │  │
+│  │  │ Three.js  │  │ transformers  │  │  │
+│  │  │ VRM       │  │   .js (ONNX)  │  │  │
+│  │  │ MediaPipe │  │ 本地模型 ~250MB│  │  │
+│  │  └──────────┘  └───────────────┘  │  │
+│  └───────────────────────────────────┘  │
+│  assets/models/ ←── ONNX bundled         │
+└─────────────────────────────────────────┘
+         │ WebSocket + WebRTC
+         ▼
+   云端 Express + Socket.IO 服务器（不变）
 ```
 
-### 生产部署 (pm2)
-```bash
-cd server && npm install
-cd client && npm install
-pm2 start ecosystem.config.cjs
+## 功能规划 (4项，~3周)
+
+### P0: App 化 + Capacitor 集成
+- Next.js `output: 'export'` 静态导出改造
+- Capacitor 配置 + iOS/Android/Electron 三平台构建
+- AI 模型本地打包：whisper-tiny (~39MB) + NLLB-200 (~200MB)
+- transformers.js 配置从本地 assets 加载模型
+
+### P1: AI 实时翻译
+- 语音 → ASR (Web Speech API 主力 / whisper-tiny fallback)
+- 文本 → NLLB-200 翻译 (transformers.js 本地推理)
+- 翻译结果 → WebRTC DataChannel "translation"
+- TranslationBar 字幕组件
+
+### P2: AI 开场话题
+- 匹配成功时根据双方兴趣标签生成破冰话题
+- 规则模板 + 标签组合（LLM 留后续版本）
+- TopicCard 话题卡片组件
+
+### P3: 基础设施升级 + Bug 修复
+- 修复手机端 `[object Event]` 报错
+- pm2: next dev → next build + next start
+- 匹配队列持久化 (SQLite)
+
+## 模型打包
+
+```
+client/public/models/onnx/
+  whisper-tiny/     ← ASR fallback (~39MB)
+  nllb-200-600M/    ← 翻译 (~200MB)
 ```
 
-### 稳定版 Docker
-```bash
-docker compose -f docker-compose.stable.yml up -d --build
-# 客户端 :4000  /  信令 :4001
-```
+- Web 版保留，不加载 AI 模型（轻量入口 → 引导下 app）
+- App 版安装包增加 ~250MB
 
-## 环境变量 (client/.env.local)
-```
-NEXT_PUBLIC_SERVER_URL=https://your-domain.com
-NEXT_PUBLIC_SOCKET_PATH=/qsignal/socket.io
-```
+## 不在此版本
 
-## ICE 配置 (client/lib/webrtc.ts)
-使用自建 TURN 中继 + 国内 STUN 服务器
+- ❌ VIP/付费体系
+- ❌ 虚拟形象皮肤
+- ❌ 指定国家匹配
+- ❌ 微信小程序
+- ❌ LLM 生成话题（先用规则模板）

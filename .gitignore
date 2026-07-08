@@ -15,3 +15,7 @@ server/data/
 # Large binary files (download via setup.sh)
 client/public/wasm/*.wasm
 client/public/models/*.task
+client/public/models/onnx/
+
+# Next.js static export
+client/out/

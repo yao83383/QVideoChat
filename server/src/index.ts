@@ -4,6 +4,7 @@ import { Server } from "socket.io";
 import cors from "cors";
 import { MatchQueue } from "./matchQueue.js";
 import { RoomManager } from "./roomManager.js";
+import { generateTopic } from "./topics.js";
 import { router as authRouter } from "./routes/auth.js";
 import { router as usersRouter } from "./routes/users.js";
 import { router as friendsRouter } from "./routes/friends.js";
@@ -43,6 +44,10 @@ const matchQueue = new MatchQueue();
 const roomManager = new RoomManager();
 const socketUsers = new Map<string, string>(); // socketId -> userId
 const activeSessions = new Map<string, string>(); // userId -> socketId
+
+// Isolated audio-test rooms — completely independent from matchQueue.
+// Used by /audio-test client page to debug WebRTC audio without any other logic.
+const testRooms = new Map<string, Set<string>>(); // roomId -> set of socketIds
 
 function kickOldSession(userId: string, newSocketId: string) {
   const oldSocketId = activeSessions.get(userId);
@@ -116,6 +121,11 @@ io.on("connection", (socket) => {
 
       io.to(pair[0].socketId).emit("match:found", { roomId, partner: partnerA });
       io.to(pair[1].socketId).emit("match:found", { roomId, partner: partnerB });
+
+      // Generate and push AI opening topic
+      const topic = generateTopic(pair[0].tags, pair[1].tags);
+      io.to(pair[0].socketId).emit("match:topic", topic);
+      io.to(pair[1].socketId).emit("match:topic", topic);
 
       console.log(`[match] ${pair[0].username} <-> ${pair[1].username} room=${roomId}`);
     }
@@ -213,6 +223,51 @@ io.on("connection", (socket) => {
     console.log(`[room:leave] ${data.roomId}`);
   });
 
+  // ===== Isolated audio-test signaling =====
+  // Peers join a shared roomId (chosen client-side, no matching). When 2 present,
+  // server picks the initiator deterministically and emits test:ready to both.
+  socket.on("test:join", (data: { roomId: string }) => {
+    const roomId = String(data?.roomId || "").slice(0, 32);
+    if (!roomId) return;
+    let peers = testRooms.get(roomId);
+    if (!peers) { peers = new Set(); testRooms.set(roomId, peers); }
+    peers.add(socket.id);
+    (socket.data as any).testRoom = roomId;
+    console.log(`[test:join] socket=${socket.id} room=${roomId} peers=${peers.size}`);
+    if (peers.size === 2) {
+      const arr = [...peers];
+      const initiator = arr[0] < arr[1] ? arr[0] : arr[1];
+      for (const sid of arr) {
+        io.to(sid).emit("test:ready", { initiator: sid === initiator });
+      }
+      console.log(`[test:ready] room=${roomId} initiator=${initiator}`);
+    } else if (peers.size > 2) {
+      // Third joiner — reject to keep test 1-on-1
+      io.to(socket.id).emit("test:full");
+      peers.delete(socket.id);
+    }
+  });
+
+  const relayTest = (event: string) => (data: { roomId: string; [k: string]: any }) => {
+    const peers = testRooms.get(data?.roomId);
+    if (!peers) return;
+    for (const sid of peers) {
+      if (sid !== socket.id) io.to(sid).emit(event, data);
+    }
+  };
+  socket.on("test:offer", relayTest("test:offer"));
+  socket.on("test:answer", relayTest("test:answer"));
+  socket.on("test:ice", relayTest("test:ice"));
+
+  socket.on("test:leave", (data: { roomId: string }) => {
+    const peers = testRooms.get(data?.roomId);
+    if (!peers) return;
+    peers.delete(socket.id);
+    for (const sid of peers) io.to(sid).emit("test:partner-left");
+    if (peers.size === 0) testRooms.delete(data.roomId);
+    console.log(`[test:leave] socket=${socket.id} room=${data.roomId}`);
+  });
+
   socket.on("disconnect", () => {
     const userId = socketUsers.get(socket.id);
 
@@ -232,6 +287,17 @@ io.on("connection", (socket) => {
       endMatchRecord(room.roomId);
       roomManager.remove(room.roomId);
       console.log(`[disconnect cleanup] ${room.roomId}`);
+    }
+
+    // Clean up test room membership
+    const testRoom = (socket.data as any)?.testRoom;
+    if (testRoom) {
+      const peers = testRooms.get(testRoom);
+      if (peers) {
+        peers.delete(socket.id);
+        for (const sid of peers) io.to(sid).emit("test:partner-left");
+        if (peers.size === 0) testRooms.delete(testRoom);
+      }
     }
 
     socketUsers.delete(socket.id);

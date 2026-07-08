@@ -40,13 +40,14 @@ export default function Home() {
       onWaiting: () => setMatchStatus("matching"),
       onFound: (data) => {
         const params = new URLSearchParams({
+          id: data.roomId,
           uid: user?.userId || "",
           uname: usernameRef.current,
           puid: data.partner.userId,
           pname: data.partner.username,
           reg: user?.isRegistered ? "1" : "0",
         });
-        router.push(`/room/${data.roomId}?${params.toString()}`);
+        router.push(`/room?${params.toString()}`);
       },
       onPartnerLeft: () => {},
       onReady: () => {},

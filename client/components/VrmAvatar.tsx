@@ -49,7 +49,7 @@ export default function VrmAvatar({
     sceneRef.current = scene;
     cameraRef.current = camera;
 
-    loadVRM("/models/sample.vrm")
+    loadVRM(`${process.env.NEXT_PUBLIC_BASE_PATH || ""}/models/sample.vrm`)
       .then((vrm) => {
         scene.add(vrm.scene);
         vrmRef.current = vrm;

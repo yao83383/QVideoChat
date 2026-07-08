@@ -91,11 +91,24 @@ function initTables(db: Database.Database) {
       FOREIGN KEY (fromUserId) REFERENCES users(userId),
       FOREIGN KEY (targetUserId) REFERENCES users(userId)
     );
+
+    CREATE TABLE IF NOT EXISTS match_queue (
+      userId     TEXT PRIMARY KEY,
+      username   TEXT NOT NULL,
+      tags       TEXT NOT NULL DEFAULT '[]',
+      deviceId   TEXT NOT NULL DEFAULT '',
+      nativeLang TEXT NOT NULL DEFAULT '',
+      targetLang TEXT NOT NULL DEFAULT '',
+      createdAt  INTEGER NOT NULL DEFAULT (unixepoch() * 1000),
+      FOREIGN KEY (userId) REFERENCES users(userId)
+    );
   `);
 
-  // Add deviceId column if missing (migration for existing DBs)
+  // Migrations for existing DBs
   try { db.exec("ALTER TABLE users ADD COLUMN deviceId TEXT NOT NULL DEFAULT ''"); } catch {}
   try { db.exec("ALTER TABLE users ADD COLUMN referredBy TEXT NOT NULL DEFAULT ''"); } catch {}
+  try { db.exec("ALTER TABLE users ADD COLUMN nativeLanguage TEXT NOT NULL DEFAULT ''"); } catch {}
+  try { db.exec("ALTER TABLE users ADD COLUMN targetLanguage TEXT NOT NULL DEFAULT ''"); } catch {}
 
   seedTags(db);
 }

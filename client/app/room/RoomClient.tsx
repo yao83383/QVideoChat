@@ -1,11 +1,13 @@
 "use client";
 
 import { useState, useEffect, useRef, useMemo } from "react";
-import { useParams, useSearchParams, useRouter } from "next/navigation";
+import { useSearchParams, useRouter } from "next/navigation";
 import VrmAvatar from "@/components/VrmAvatar";
 import MatchButton from "@/components/MatchButton";
 import VoiceStatus from "@/components/VoiceStatus";
 import LoginPrompt from "@/components/LoginPrompt";
+import TranslationBar from "@/components/TranslationBar";
+import TopicCard from "@/components/TopicCard";
 import { getSettings } from "@/components/SettingsModal";
 import { useFaceMesh } from "@/hooks/useFaceMesh";
 import { usePeer } from "@/hooks/usePeer";
@@ -13,11 +15,11 @@ import { useSocket } from "@/hooks/useSocket";
 import { reportUser } from "@/lib/api";
 import type { MatchEvents, SignalEvents } from "@/hooks/useSocket";
 
-export default function Room() {
+export default function RoomClient() {
   const router = useRouter();
-  const { id: roomId } = useParams<{ id: string }>();
   const sp = useSearchParams();
 
+  const roomId = sp.get("id") || "";
   const userId = sp.get("uid") || "";
   const uname = sp.get("uname") || "我";
   const puid = sp.get("puid") || "";
@@ -31,6 +33,12 @@ export default function Room() {
   const [showFriendPrompt, setShowFriendPrompt] = useState(false);
   const [reported, setReported] = useState(false);
   const [showLoginModal, setShowLoginModal] = useState(false);
+  const [topicText, setTopicText] = useState("");
+  const [topicCategory, setTopicCategory] = useState("general");
+  const [mySourceText, setMySourceText] = useState<string | null>(null);
+  const [myTranslatedText, setMyTranslatedText] = useState<string | null>(null);
+  const [peerSourceText, setPeerSourceText] = useState<string | null>(null);
+  const [peerTranslatedText, setPeerTranslatedText] = useState<string | null>(null);
 
   const { blendshapeRef, isLoaded, isCameraOn, error: camError, step: camStep, faceFound, start, stop, toggleCamera } = useFaceMesh();
   useEffect(() => { start(); return () => stop(); }, []);
@@ -69,6 +77,10 @@ export default function Room() {
     onSessionKick: () => {
       router.push("/");
     },
+    onTopic: (data) => {
+      setTopicText(data.text);
+      setTopicCategory(data.category || "general");
+    },
   }), [puid, router]);
 
   const socket = useSocket(matchEvents, signalEvents);
@@ -87,11 +99,18 @@ export default function Room() {
     onIceRef.current = peer.handleIncomingIce;
   });
 
+  const initStartedRef = useRef(false);
   useEffect(() => {
-    if (!socket.isConnected || !isLoaded || peer.isConnecting || peer.isConnected) return;
-    socket.joinRoom(roomId, userId);
-    peer.initConnection(false);
-  }, [socket.isConnected, isLoaded, peer.isConnecting, peer.isConnected, roomId, userId, peer.initConnection]);
+    if (!socket.isConnected || !isLoaded) return;
+    if (initStartedRef.current) return;
+    initStartedRef.current = true;
+    (async () => {
+      try {
+        await peer.initConnection(false);
+        socket.joinRoom(roomId, userId);
+      } catch { /* error surfaced via peer.error */ }
+    })();
+  }, [socket.isConnected, isLoaded, roomId, userId, peer.initConnection, socket.joinRoom]);
 
   useEffect(() => {
     if (!roomReady || !isInitiator) return;
@@ -99,52 +118,61 @@ export default function Room() {
   }, [roomReady, isInitiator, peer.startAsInitiator]);
 
   const audioRef = useRef<HTMLAudioElement | null>(null);
-  const [audioBlocked, setAudioBlocked] = useState(true);
-  const audioRetryRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
-    if (peer.remoteAudioStream) {
-      setAudioBlocked(true);
-      // Clear old retry timer
-      if (audioRetryRef.current) clearInterval(audioRetryRef.current);
-    }
-    return () => {
-      if (audioRef.current) { audioRef.current.srcObject = null; audioRef.current = null; }
-    };
-  }, [peer.remoteAudioStream]);
-
-  const unlockAudio = () => {
+    const audio = audioRef.current;
+    if (!audio) return;
     const stream = peer.remoteAudioStream;
     if (!stream) {
-      // No remote audio yet, retry until it arrives
-      if (audioRetryRef.current) clearInterval(audioRetryRef.current);
-      audioRetryRef.current = setInterval(() => {
-        if (peer.remoteAudioStream) {
-          clearInterval(audioRetryRef.current!);
-          tryPlayAudio(peer.remoteAudioStream);
-        }
-      }, 1000);
+      audio.srcObject = null;
       return;
     }
-    tryPlayAudio(stream);
-  };
-
-  const tryPlayAudio = (stream: MediaStream) => {
-    if (audioRef.current) { audioRef.current.srcObject = null; }
-    const ac = new (window.AudioContext || (window as any).webkitAudioContext)();
-    ac.resume();
-    const audio = new Audio();
+    const tracks = stream.getAudioTracks();
+    console.log("[audio] remote stream ready, tracks=", tracks.map((t) => ({
+      id: t.id, enabled: t.enabled, muted: t.muted, readyState: t.readyState,
+    })));
     audio.srcObject = stream;
     audio.muted = false;
     audio.volume = 1;
-    audioRef.current = audio;
-    audio.play().then(() => setAudioBlocked(false)).catch((e) => console.log("audio play failed:", e));
-  };
 
-  // Auto-unlock on first tap
-  const handleFirstInteraction = () => {
-    if (audioBlocked && audioRef.current) unlockAudio();
-  };
+    let cancelled = false;
+    const cleanupListeners: Array<() => void> = [];
+    const tryPlay = (source: string) => {
+      audio.play()
+        .then(() => { console.log(`[audio] play ok (${source})`); })
+        .catch((e) => {
+          if (cancelled) return;
+          console.warn(`[audio] play failed (${source}), will retry on next interaction:`, e?.name || e);
+          const retry = () => {
+            cleanupListeners.forEach((fn) => fn());
+            cleanupListeners.length = 0;
+            tryPlay("interaction");
+          };
+          const events: Array<keyof DocumentEventMap> = ["click", "pointerdown", "keydown", "touchstart"];
+          events.forEach((ev) => {
+            document.addEventListener(ev, retry, { once: true, passive: true });
+            cleanupListeners.push(() => document.removeEventListener(ev, retry));
+          });
+        });
+    };
+    tryPlay("auto");
+
+    let lastCT = 0;
+    const diag = setInterval(() => {
+      const t = tracks[0];
+      console.log("[audio] diag paused=", audio.paused, "muted=", audio.muted, "vol=", audio.volume,
+        "currentTime=", audio.currentTime.toFixed(2), "advancing=", audio.currentTime > lastCT,
+        "readyState=", audio.readyState,
+        "trackMuted=", t?.muted, "trackEnabled=", t?.enabled, "trackReadyState=", t?.readyState);
+      lastCT = audio.currentTime;
+    }, 3000);
+
+    return () => {
+      cancelled = true;
+      cleanupListeners.forEach((fn) => fn());
+      clearInterval(diag);
+    };
+  }, [peer.remoteAudioStream]);
 
   const handleHangup = () => {
     socket.leaveRoom(roomId);
@@ -182,7 +210,8 @@ export default function Room() {
   }
 
   return (
-    <main className="flex min-h-screen flex-col items-center justify-center gap-6 p-4" onClick={handleFirstInteraction}>
+    <main className="flex min-h-screen flex-col items-center justify-center gap-6 p-4">
+      <audio ref={audioRef} autoPlay playsInline hidden />
       <h1 className="text-xl font-bold tracking-tight">QVideoChat</h1>
 
       {partnerLeft && (
@@ -191,6 +220,11 @@ export default function Room() {
       {peer.error && (
         <p className="text-red-400 text-sm">{peer.error}</p>
       )}
+
+      {topicText && <TopicCard text={topicText} category={topicCategory} />}
+
+      <TranslationBar sourceText={peerSourceText} translatedText={peerTranslatedText} sourceLang="en" targetLang="zh" />
+      <TranslationBar sourceText={mySourceText} translatedText={myTranslatedText} sourceLang="zh" targetLang="en" />
 
       {friendStatus === "received" && !partnerLeft && (
         <p className="rounded-lg bg-green-900/30 px-4 py-2 text-green-400 text-xs">{pname} 想加你为好友</p>
@@ -247,15 +281,7 @@ export default function Room() {
         </div>
       )}
 
-      {peer.isConnected && audioBlocked && (
-        <button
-          onClick={unlockAudio}
-          className="rounded-lg bg-green-600 px-5 py-2 text-sm text-white font-medium hover:bg-green-500 animate-pulse"
-        >
-          🔈 点击启用语音 {!peer.remoteAudioStream && "(等待音频...)"}
-        </button>
-      )}
-      {peer.isConnected && !audioBlocked && (
+      {peer.isConnected && (
         <p className="text-xs text-green-400/60">语音已连接</p>
       )}
 

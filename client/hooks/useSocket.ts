@@ -14,6 +14,7 @@ export interface MatchEvents {
   onFriendRequest?: (data: { fromUserId: string; fromUsername: string }) => void;
   onFriendAccepted?: (data: { userId: string }) => void;
   onSessionKick?: (data: { message: string }) => void;
+  onTopic?: (data: { text: string; category: string }) => void;
 }
 
 export interface SignalEvents {
@@ -71,6 +72,7 @@ export function useSocket(
     socket.on("friend:request", (data) => matchEventsRef.current.onFriendRequest?.(data));
     socket.on("friend:accepted", (data) => matchEventsRef.current.onFriendAccepted?.(data));
     socket.on("session:kick", (data) => matchEventsRef.current.onSessionKick?.(data));
+    socket.on("match:topic", (data) => matchEventsRef.current.onTopic?.(data));
 
     socketRef.current = socket;
 

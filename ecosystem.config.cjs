@@ -11,7 +11,7 @@ module.exports = {
       name: "qvideo-client",
       cwd: "/opt/qvideochat/client",
       script: "npx",
-      args: "next dev --port 3000",
+      args: "next start --port 3000",
       watch: false,
     },
   ],

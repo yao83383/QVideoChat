@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">QVideoChat</string>
+    <string name="title_activity_main">QVideoChat</string>
+    <string name="package_name">com.qvideochat.app</string>
+    <string name="custom_url_scheme">com.qvideochat.app</string>
+</resources>
