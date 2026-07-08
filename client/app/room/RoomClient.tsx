@@ -8,12 +8,26 @@ import VoiceStatus from "@/components/VoiceStatus";
 import LoginPrompt from "@/components/LoginPrompt";
 import TranslationBar from "@/components/TranslationBar";
 import TopicCard from "@/components/TopicCard";
+import LanguageSelector from "@/components/LanguageSelector";
 import { getSettings } from "@/components/SettingsModal";
 import { useFaceMesh } from "@/hooks/useFaceMesh";
 import { usePeer } from "@/hooks/usePeer";
 import { useSocket } from "@/hooks/useSocket";
 import { reportUser } from "@/lib/api";
+import { createWebSpeechASR } from "@/lib/ai/asr";
+import { translateText } from "@/lib/ai/translate";
 import type { MatchEvents, SignalEvents } from "@/hooks/useSocket";
+
+function loadPref<T>(key: string, fallback: T): T {
+  try {
+    const raw = localStorage.getItem(key);
+    return raw ? JSON.parse(raw) : fallback;
+  } catch { return fallback; }
+}
+
+function savePref(key: string, val: unknown) {
+  try { localStorage.setItem(key, JSON.stringify(val)); } catch { /* ignore */ }
+}
 
 export default function RoomClient() {
   const router = useRouter();
@@ -39,6 +53,9 @@ export default function RoomClient() {
   const [myTranslatedText, setMyTranslatedText] = useState<string | null>(null);
   const [peerSourceText, setPeerSourceText] = useState<string | null>(null);
   const [peerTranslatedText, setPeerTranslatedText] = useState<string | null>(null);
+  const [sourceLang, setSourceLang] = useState(() => loadPref("qv_sl", "zh"));
+  const [targetLang, setTargetLang] = useState(() => loadPref("qv_tl", "en"));
+  const [subtitleEnabled, setSubtitleEnabled] = useState(false);
 
   const { blendshapeRef, isLoaded, isCameraOn, error: camError, step: camStep, faceFound, start, stop, toggleCamera } = useFaceMesh();
   useEffect(() => { start(); return () => stop(); }, []);
@@ -174,6 +191,55 @@ export default function RoomClient() {
     };
   }, [peer.remoteAudioStream]);
 
+  // --- AI Translation Pipeline ---
+
+  // Web Speech API → translate → display + send to peer
+  useEffect(() => {
+    if (!subtitleEnabled || !peer.isConnected || !peer.isMicOn) return;
+
+    const engine = createWebSpeechASR(
+      sourceLang,
+      (result) => {
+        setMySourceText(result.text);
+        // Translate in background — NLLB-200 is heavy, don't block UI
+        translateText(result.text, sourceLang, targetLang)
+          .then((tr) => {
+            setMyTranslatedText(tr.translatedText);
+            peer.sendTranslation({
+              text: tr.translatedText,
+              sourceLang,
+              targetLang,
+            });
+          })
+          .catch((e) => console.warn("[translate]", e));
+      },
+      (err) => console.warn("[asr]", err),
+    );
+
+    if (engine) engine.start();
+    return () => engine?.stop();
+  }, [subtitleEnabled, peer.isConnected, peer.isMicOn, sourceLang, targetLang]);
+
+  // Receive peer translations via DataChannel
+  useEffect(() => {
+    if (!subtitleEnabled) return;
+    const interval = setInterval(() => {
+      const msg = peer.remoteTranslationRef.current;
+      if (msg && msg.text) {
+        setPeerTranslatedText(msg.text);
+        // Clear after reading so it doesn't keep re-rendering
+        peer.remoteTranslationRef.current = null;
+      }
+    }, 200);
+    return () => clearInterval(interval);
+  }, [subtitleEnabled]);
+
+  // --- Handlers ---
+
+  const handleSourceLangChange = (lang: string) => { setSourceLang(lang); savePref("qv_sl", lang); };
+  const handleTargetLangChange = (lang: string) => { setTargetLang(lang); savePref("qv_tl", lang); };
+  const handleSubtitleToggle = () => setSubtitleEnabled((v) => !v);
+
   const handleHangup = () => {
     socket.leaveRoom(roomId);
     peer.disconnect();
@@ -223,8 +289,8 @@ export default function RoomClient() {
 
       {topicText && <TopicCard text={topicText} category={topicCategory} />}
 
-      <TranslationBar sourceText={peerSourceText} translatedText={peerTranslatedText} sourceLang="en" targetLang="zh" />
-      <TranslationBar sourceText={mySourceText} translatedText={myTranslatedText} sourceLang="zh" targetLang="en" />
+      <TranslationBar sourceText={peerSourceText} translatedText={peerTranslatedText} sourceLang={targetLang} targetLang={sourceLang} />
+      <TranslationBar sourceText={mySourceText} translatedText={myTranslatedText} sourceLang={sourceLang} targetLang={targetLang} />
 
       {friendStatus === "received" && !partnerLeft && (
         <p className="rounded-lg bg-green-900/30 px-4 py-2 text-green-400 text-xs">{pname} 想加你为好友</p>
@@ -279,6 +345,17 @@ export default function RoomClient() {
             {peer.isMicOn ? "🎙" : "🎙"}
           </button>
         </div>
+      )}
+
+      {peer.isConnected && (
+        <LanguageSelector
+          sourceLang={sourceLang}
+          targetLang={targetLang}
+          subtitleEnabled={subtitleEnabled}
+          onSourceChange={handleSourceLangChange}
+          onTargetChange={handleTargetLangChange}
+          onSubtitleToggle={handleSubtitleToggle}
+        />
       )}
 
       {peer.isConnected && (

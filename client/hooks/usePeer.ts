@@ -10,8 +10,15 @@ interface SignalingEvents {
   onIceCandidate: (candidate: RTCIceCandidateInit) => void;
 }
 
+export interface TranslationMessage {
+  text: string;
+  sourceLang: string;
+  targetLang: string;
+}
+
 export interface UsePeerReturn {
   remoteBlendshapeRef: React.MutableRefObject<BlendshapeFrame | null>;
+  remoteTranslationRef: React.MutableRefObject<TranslationMessage | null>;
   remoteAudioStream: MediaStream | null;
   localAudioStream: MediaStream | null;
   isConnected: boolean;
@@ -20,6 +27,8 @@ export interface UsePeerReturn {
   error: string | null;
   isMicOn: boolean;
   toggleMic: () => void;
+  /** Send a translated subtitle to the peer via DataChannel. */
+  sendTranslation: (msg: TranslationMessage) => void;
   /** Initializes the voice + PC + data channel handlers. Await this before any signalling. */
   initConnection: (asInitiator: boolean) => Promise<void>;
   /** Called by the initiator once the room is ready to send the offer. */
@@ -30,17 +39,15 @@ export interface UsePeerReturn {
   disconnect: () => void;
 }
 
-/**
- * usePeer — combines VoiceConnection (audio) with a blendshape DataChannel.
- * All the voice-related complexity lives in VoiceConnection.
- */
 export function usePeer(
   blendshapeRef: React.MutableRefObject<BlendshapeFrame | null>,
   signaling: SignalingEvents,
 ): UsePeerReturn {
   const voiceRef = useRef<VoiceConnection | null>(null);
   const dcRef = useRef<RTCDataChannel | null>(null);
+  const translateDcRef = useRef<RTCDataChannel | null>(null);
   const remoteBlendshapeRef = useRef<BlendshapeFrame | null>(null);
+  const remoteTranslationRef = useRef<TranslationMessage | null>(null);
   const sendTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const signalingRef = useRef(signaling);
   signalingRef.current = signaling;
@@ -53,7 +60,7 @@ export function usePeer(
   const [error, setError] = useState<string | null>(null);
   const [isMicOn, setIsMicOn] = useState(true);
 
-  const setupDataChannel = useCallback((dc: RTCDataChannel) => {
+  const setupBlendshapeChannel = useCallback((dc: RTCDataChannel) => {
     dcRef.current = dc;
     dc.onopen = () => {
       setIsConnected(true);
@@ -80,19 +87,51 @@ export function usePeer(
     };
   }, [blendshapeRef]);
 
+  const setupTranslationChannel = useCallback((dc: RTCDataChannel) => {
+    translateDcRef.current = dc;
+    dc.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data);
+        if (data.text) {
+          remoteTranslationRef.current = {
+            text: data.text,
+            sourceLang: data.sl || "",
+            targetLang: data.tl || "",
+          };
+        }
+      } catch { /* ignore */ }
+    };
+  }, []);
+
   const cleanup = useCallback(() => {
     if (sendTimerRef.current) { clearInterval(sendTimerRef.current); sendTimerRef.current = null; }
     dcRef.current?.close(); dcRef.current = null;
+    translateDcRef.current?.close(); translateDcRef.current = null;
     voiceRef.current?.close(); voiceRef.current = null;
     remoteBlendshapeRef.current = null;
+    remoteTranslationRef.current = null;
     setRemoteAudioStream(null); setLocalAudioStream(null); setIsConnected(false); setIsConnecting(false); setIceState("idle");
   }, []);
 
-  /**
-   * Order matters for correct signalling: acquire mic + attach BEFORE any
-   * `join` message goes out, so the server can't emit `ready` until both
-   * peers already have their local audio track on the PC.
-   */
+  const sendTranslation = useCallback((msg: TranslationMessage) => {
+    if (translateDcRef.current?.readyState === "open") {
+      translateDcRef.current.send(JSON.stringify({
+        text: msg.text,
+        sl: msg.sourceLang,
+        tl: msg.targetLang,
+      }));
+    }
+  }, []);
+
+  const onDataChannel = useCallback((event: RTCDataChannelEvent) => {
+    const label = event.channel.label;
+    if (label === "translation") {
+      setupTranslationChannel(event.channel);
+    } else {
+      setupBlendshapeChannel(event.channel);
+    }
+  }, [setupBlendshapeChannel, setupTranslationChannel]);
+
   const initConnection = useCallback(async (asInitiator: boolean) => {
     cleanup();
     setIsConnecting(true);
@@ -111,17 +150,15 @@ export function usePeer(
       },
       onIceState: (s) => setIceState(s),
       onStats: (st) => {
-        // Optional stats surface — dev-time console only.
-        // eslint-disable-next-line no-console
         console.log("[voice.stats]", JSON.stringify(st));
       },
       log: (msg) => console.log("[voice]", msg),
     });
     voiceRef.current = voice;
 
-    // Answerer must have ondatachannel hooked BEFORE receiving the remote offer.
+    // Answerer must hook ondatachannel BEFORE receiving the remote offer.
     if (!asInitiator) {
-      voice.pc.ondatachannel = (event) => setupDataChannel(event.channel);
+      voice.pc.ondatachannel = onDataChannel;
     }
 
     try {
@@ -131,21 +168,25 @@ export function usePeer(
       cleanup();
       throw e;
     }
-  }, [cleanup, setupDataChannel]);
+  }, [cleanup, onDataChannel]);
 
   const startAsInitiator = useCallback(async () => {
     const voice = voiceRef.current;
     if (!voice) { setError("Voice not ready"); return; }
-    // Guard against double-invoke: if we already have a local offer, skip.
     if (voice.pc.localDescription) return;
     try {
-      const dc = voice.pc.createDataChannel("blendshape", { ordered: true, maxRetransmits: 0 });
-      setupDataChannel(dc);
+      // Create both data channels before sending offer (must be done before setLocalDescription)
+      const bsDc = voice.pc.createDataChannel("blendshape", { ordered: true, maxRetransmits: 0 });
+      setupBlendshapeChannel(bsDc);
+
+      const trDc = voice.pc.createDataChannel("translation", { ordered: true });
+      setupTranslationChannel(trDc);
+
       await voice.createAndSendOffer();
     } catch (e) {
       setError(e instanceof Error ? e.message : "发送 Offer 失败");
     }
-  }, [setupDataChannel]);
+  }, [setupBlendshapeChannel, setupTranslationChannel]);
 
   const handleIncomingOffer = useCallback(async (sdp: RTCSessionDescriptionInit) => {
     const voice = voiceRef.current;
@@ -184,8 +225,9 @@ export function usePeer(
   useEffect(() => () => cleanup(), [cleanup]);
 
   return {
-    remoteBlendshapeRef, remoteAudioStream, localAudioStream, isConnected, isConnecting, iceState, error,
-    isMicOn, toggleMic,
+    remoteBlendshapeRef, remoteTranslationRef, remoteAudioStream, localAudioStream,
+    isConnected, isConnecting, iceState, error,
+    isMicOn, toggleMic, sendTranslation,
     initConnection, startAsInitiator,
     handleIncomingOffer, handleIncomingAnswer, handleIncomingIce,
     disconnect: cleanup,
