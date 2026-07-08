@@ -2,11 +2,14 @@
 
 ## 版本号规则
 
-- 版本号遵循语义化版本：`MAJOR.MINOR.PATCH`
-- **每次打包（deploy/packaging）时，必须将 PATCH 位（最低位）增加 1**
-- 例如：1.2.0 → 打包 → 1.2.1 → 打包 → 1.2.2
-- 打包前同时更新 `server/package.json` 和 `client/package.json` 中的 version 字段
-- MINOR 和 MAJOR 位仅在重大功能或架构变更时手动决定
+- 完整版本号格式：`MAJOR.MINOR.PATCH.BUILD`，首页展示用
+- `MAJOR.MINOR.PATCH` 遵循语义化版本，记录在 `server/package.json` 和 `client/package.json`
+- `BUILD` 为三位数字（如 001, 002），代表每次代码改动
+- **每次修改代码后，BUILD 位（第四位）增加 1**
+- **每次打包（deploy/packaging）时，将 PATCH 位（第三位）增加 1，BUILD 重置为 001**
+- 例如：1.2.0.001 → 改代码 → 1.2.0.002 → 打包 → 1.2.1.001 → 改代码 → 1.2.1.002
+- 修改代码时更新 `client/.env.local` 中的 `NEXT_PUBLIC_APP_VERSION`
+- 打包时同步更新 `server/package.json`、`client/package.json` 和 `client/.env.local`
 
 ## 项目概述
 
