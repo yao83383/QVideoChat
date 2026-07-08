@@ -18,9 +18,12 @@ interface Props {
 export default function TagSelector({ selected, onChange }: Props) {
   const [allTags, setAllTags] = useState<Tag[]>([]);
   const [expanded, setExpanded] = useState(false);
+  const [loaded, setLoaded] = useState(false);
 
   useEffect(() => {
-    api.getAllTags().then(setAllTags).catch(() => {});
+    api.getAllTags()
+      .then((tags) => { setAllTags(tags); setLoaded(true); })
+      .catch(() => { setLoaded(true); });
   }, []);
 
   const toggle = (name: string) => {
@@ -33,15 +36,22 @@ export default function TagSelector({ selected, onChange }: Props) {
 
   const categories = [...new Set(allTags.map((t) => t.category))];
 
-  if (allTags.length === 0) return null;
-
+  // Always show the selector button, even if tags haven't loaded yet
   return (
     <div className="flex flex-col items-center gap-2">
       <button
         onClick={() => setExpanded(!expanded)}
         className="flex items-center gap-1.5 text-xs text-neutral-400 hover:text-neutral-300 transition"
       >
-        <span>{selected.length > 0 ? `已选 ${selected.length} 个标签` : "选择兴趣标签 (可选)"}</span>
+        <span>
+          {selected.length > 0
+            ? `已选 ${selected.length} 个标签`
+            : !loaded
+            ? "加载标签中..."
+            : allTags.length === 0
+            ? "兴趣标签暂不可用"
+            : "选择兴趣标签 (可选)"}
+        </span>
         <span className="text-[10px]">{expanded ? "▲" : "▼"}</span>
       </button>
 

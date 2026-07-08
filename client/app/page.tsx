@@ -154,6 +154,7 @@ export default function Home() {
 
       <h1 className="text-3xl font-bold tracking-tight">QVideoChat</h1>
       <p className="text-neutral-400 text-sm">Q版虚拟形象 · 随机匹配通话</p>
+      <p className="text-neutral-600 text-[10px]">v{process.env.NEXT_PUBLIC_APP_VERSION || "0.0.0"}</p>
 
       <NameInput value={username} onChange={setUsername} disabled={matchStatus !== "idle"} />
 
