@@ -68,6 +68,11 @@ export function useFaceMesh() {
     try {
       setError(null);
 
+      if (!navigator.mediaDevices?.getUserMedia) {
+        setError("当前浏览器不支持摄像头 (需要 HTTPS 或 localhost)");
+        return;
+      }
+
       setStep("camera");
       const stream = await navigator.mediaDevices.getUserMedia({
         video: { width: 640, height: 480, facingMode: "user" },

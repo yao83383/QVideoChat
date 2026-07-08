@@ -100,6 +100,11 @@ export class VoiceConnection {
    */
   async attachMic(constraints?: MediaTrackConstraints): Promise<MediaStream> {
     if (this.closed) throw new Error("VoiceConnection is closed");
+
+    if (!navigator.mediaDevices?.getUserMedia) {
+      throw new Error("当前浏览器不支持麦克风 (需要 HTTPS 或 localhost)");
+    }
+
     const stream = await navigator.mediaDevices.getUserMedia({
       audio: constraints ?? { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
     });
