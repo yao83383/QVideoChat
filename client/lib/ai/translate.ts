@@ -1,28 +1,9 @@
 /**
- * Translation — NLLB-200 via transformers.js.
- * Supports 200 languages including zh ↔ en.
- *
- * NLLB language codes:
- *   Chinese (Simplified):  zho_Hans
- *   English:               eng_Latn
- *   Japanese:              jpn_Jpan
- *   Korean:                kor_Hang
+ * Translation — small OPUS-MT models (~78MB per language pair).
+ * Uses pivot translation via English for pairs without a direct model.
  */
 
-import { initTranslate } from './index';
-
-const LANG_TO_NLLB: Record<string, string> = {
-  zh: 'zho_Hans',
-  'zh-CN': 'zho_Hans',
-  en: 'eng_Latn',
-  'en-US': 'eng_Latn',
-  ja: 'jpn_Jpan',
-  ko: 'kor_Hang',
-};
-
-function toNllbCode(lang: string): string {
-  return LANG_TO_NLLB[lang] || LANG_TO_NLLB[lang.split('-')[0]] || 'eng_Latn';
-}
+import { initTranslateForPair, runTranslation } from './index';
 
 export interface TranslateResult {
   sourceText: string;
@@ -30,6 +11,8 @@ export interface TranslateResult {
   sourceLang: string;
   targetLang: string;
 }
+
+// ----- Queue for translation requests -----
 
 let translateQueue: Array<{
   text: string;
@@ -48,19 +31,42 @@ async function flushQueue() {
     const batch = translateQueue.splice(0, translateQueue.length);
     for (const item of batch) {
       try {
-        const translator = await initTranslate();
-        const srcCode = toNllbCode(item.sourceLang);
-        const tgtCode = toNllbCode(item.targetLang);
+        const src = (item.sourceLang || '').split('-')[0];
+        const tgt = (item.targetLang || '').split('-')[0];
 
-        // NLLB translation pipeline: pass src_lang and tgt_lang as generation kwargs
-        const output = await (translator as any)(item.text, {
-          src_lang: srcCode,
-          tgt_lang: tgtCode,
-        });
+        // Try direct model first
+        const direct = await initTranslateForPair(src, tgt);
+
+        let result: string;
+
+        if (direct) {
+          // Direct translation
+          result = await runTranslation(direct, item.text);
+        } else if (src !== 'en' && tgt !== 'en') {
+          // Pivot translation: src → en → tgt
+          const srcToEn = await initTranslateForPair(src, 'en');
+          const enToTgt = await initTranslateForPair('en', tgt);
+
+          if (srcToEn && enToTgt) {
+            const pivotText = await runTranslation(srcToEn, item.text);
+            result = await runTranslation(enToTgt, pivotText);
+          } else {
+            // Partial pivot: just translate one direction
+            if (srcToEn) {
+              result = await runTranslation(srcToEn, item.text);
+            } else if (enToTgt) {
+              result = await runTranslation(enToTgt, item.text);
+            } else {
+              throw new Error(`No translation model for ${src}→${tgt}`);
+            }
+          }
+        } else {
+          throw new Error(`No translation model for ${src}→${tgt}`);
+        }
 
         item.resolve({
           sourceText: item.text,
-          translatedText: (output as any)?.[0]?.translation_text || '',
+          translatedText: result,
           sourceLang: item.sourceLang,
           targetLang: item.targetLang,
         });
@@ -83,8 +89,3 @@ export async function translateText(
     flushQueue();
   });
 }
-
-// NLLB-200 requires the source language to be specified in the prompt.
-// The format is: the text prefixed with the source language tag.
-// Example: "zho_Hans 你好" → "eng_Latn Hello"
-// This is handled automatically by the pipeline.

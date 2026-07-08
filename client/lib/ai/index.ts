@@ -1,101 +1,119 @@
 /**
  * AI module — client-side inference via transformers.js (ONNX Runtime).
- * Coordinates model loading, caching, and pipeline lifecycle.
+ * Manages ASR and translation pipelines. Translation uses small (~78MB)
+ * OPUS-MT models per language pair instead of one giant model.
  */
 
 import { pipeline, env } from '@huggingface/transformers';
 
-// Pipeline type — transformers.js returns a union type that's too wide for TS narrowing.
-// We use 'any' for the actual invocation; the module is a thin wrapper.
 type AIPipeline = any;
 
-const MODEL_CACHE_NAME = 'qvideochat-ai-models';
-const MODEL_CACHE_STORE = 'models';
+// ----- Language pair → model mapping -----
+// OPUS-MT models are small (~78MB each), bilingual, and fast.
 
-interface ModelCacheEntry {
-  key: string;
-  data: ArrayBuffer;
-}
+const TRANSLATE_MODELS: Record<string, string> = {
+  'zh->en': 'Xenova/opus-mt-zh-en',
+  'en->zh': 'Xenova/opus-mt-en-zh',
+  'zh->ja': 'Xenova/opus-mt-zh-ja',
+  'ja->zh': 'Xenova/opus-mt-ja-zh',
+  'en->ja': 'Xenova/opus-mt-en-ja',
+  'ja->en': 'Xenova/opus-mt-ja-en',
+  // ko models: may not exist; use en as pivot
+};
 
-// ----- cache helpers -----
-
-function openCache(): Promise<IDBDatabase> {
-  return new Promise((resolve, reject) => {
-    const req = indexedDB.open(MODEL_CACHE_NAME, 1);
-    req.onupgradeneeded = () => {
-      req.result.createObjectStore(MODEL_CACHE_STORE);
-    };
-    req.onsuccess = () => resolve(req.result);
-    req.onerror = () => reject(req.error);
-  });
-}
-
-export async function getCachedModel(key: string): Promise<ArrayBuffer | null> {
-  const db = await openCache();
-  return new Promise((resolve, reject) => {
-    const tx = db.transaction(MODEL_CACHE_STORE, 'readonly');
-    const req = tx.objectStore(MODEL_CACHE_STORE).get(key);
-    req.onsuccess = () => resolve(req.result?.data ?? null);
-    req.onerror = () => reject(req.error);
-  });
-}
-
-export async function setCachedModel(key: string, data: ArrayBuffer): Promise<void> {
-  const db = await openCache();
-  return new Promise((resolve, reject) => {
-    const tx = db.transaction(MODEL_CACHE_STORE, 'readwrite');
-    tx.objectStore(MODEL_CACHE_STORE).put({ key, data });
-    tx.oncomplete = () => resolve();
-    tx.onerror = () => reject(tx.error);
-  });
-}
+// Use English as pivot for language pairs without a direct model.
+// zh->ko = zh->en + en->ko = zh->en + en->XX → fall back to en output
+const PIVOT_LANG = 'en';
 
 // ----- model paths -----
 
 const MODELS_BASE = '/models/onnx';
+env.localModelPath = MODELS_BASE;
 
-export interface AIModels {
-  asr: AIPipeline | null;
-  translate: AIPipeline | null;
-}
+// ----- pipeline cache -----
 
-const state: AIModels = {
-  asr: null,
-  translate: null,
-};
+const pipelines: Record<string, AIPipeline> = {};
 
-// ----- initialization -----
+// ----- ASR -----
 
 export async function initASR(): Promise<AIPipeline> {
-  if (state.asr) return state.asr;
-  console.log('[AI] loading ASR pipeline...');
-  state.asr = await pipeline('automatic-speech-recognition', 'Xenova/whisper-tiny', {
-    device: 'wasm',
-  });
-  console.log('[AI] ASR pipeline ready');
-  return state.asr;
+  const key = 'asr';
+  if (pipelines[key]) return pipelines[key];
+  console.log('[AI] loading ASR pipeline (whisper-tiny ~39MB)...');
+  pipelines[key] = await pipeline('automatic-speech-recognition', 'Xenova/whisper-tiny', { device: 'wasm' });
+  console.log('[AI] ASR ready');
+  return pipelines[key];
 }
 
-export async function initTranslate(): Promise<AIPipeline> {
-  if (state.translate) return state.translate;
-  console.log('[AI] loading translation pipeline...');
-  // NLLB-200 distilled 600M — supports 200 languages including zh ↔ en
-  state.translate = await pipeline('translation', 'Xenova/nllb-200-distilled-600M', {
-    device: 'wasm',
-  });
-  console.log('[AI] translation pipeline ready');
-  return state.translate;
+// ----- Translation -----
+
+export async function initTranslateForPair(
+  sourceLang: string,
+  targetLang: string,
+): Promise<AIPipeline | null> {
+  // Normalize language codes
+  const src = (sourceLang || '').split('-')[0];
+  const tgt = (targetLang || '').split('-')[0];
+  const pairKey = `${src}->${tgt}`;
+  const modelId = TRANSLATE_MODELS[pairKey];
+
+  if (modelId) {
+    // Direct model exists
+    const key = `tr-${pairKey}`;
+    if (pipelines[key]) return pipelines[key];
+    console.log(`[AI] loading translation ${pairKey} (${modelId})...`);
+    try {
+      pipelines[key] = await pipeline('translation', modelId, { device: 'wasm' });
+      console.log(`[AI] ${pairKey} ready`);
+      return pipelines[key];
+    } catch (e) {
+      console.warn(`[AI] failed to load ${modelId}:`, e);
+      return null;
+    }
+  }
+
+  // No direct model — try pivot via English
+  if (src !== PIVOT_LANG && tgt !== PIVOT_LANG) {
+    console.log(`[AI] no direct model for ${pairKey}, using ${PIVOT_LANG} pivot`);
+    const srcToPivot = await initTranslateForPair(src, PIVOT_LANG);
+    if (srcToPivot) return null; // caller will chain two translations
+  }
+
+  // Try to at least translate to/from English as fallback
+  if (src !== PIVOT_LANG) return initTranslateForPair(src, PIVOT_LANG);
+  if (tgt !== PIVOT_LANG) return initTranslateForPair(PIVOT_LANG, tgt);
+
+  return null;
 }
 
-export function getModels(): AIModels {
-  return state;
+export async function runTranslation(
+  pipeline: AIPipeline,
+  text: string,
+): Promise<string> {
+  const output = await (pipeline as any)(text);
+  return (output as any)?.[0]?.translation_text || '';
+}
+
+export function getPipelineKey(sourceLang: string, targetLang: string): string {
+  const src = (sourceLang || '').split('-')[0];
+  const tgt = (targetLang || '').split('-')[0];
+  return `tr-${src}->${tgt}`;
+}
+
+export function getModelSize(key: string): string {
+  const sizes: Record<string, string> = {
+    'zh->en': '~78MB',
+    'en->zh': '~78MB',
+    'zh->ja': '~78MB',
+    'ja->zh': '~78MB',
+    'en->ja': '~78MB',
+    'ja->en': '~78MB',
+  };
+  return sizes[key] || 'unknown';
 }
 
 export function disposeModels(): void {
-  state.asr = null;
-  state.translate = null;
+  for (const key of Object.keys(pipelines)) {
+    delete pipelines[key];
+  }
 }
-
-// Configure local model path for Capacitor bundled models.
-// In Capacitor, local assets are served from the root.
-env.localModelPath = MODELS_BASE;
