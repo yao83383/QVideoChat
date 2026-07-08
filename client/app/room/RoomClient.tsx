@@ -6,7 +6,6 @@ import VrmAvatar from "@/components/VrmAvatar";
 import MatchButton from "@/components/MatchButton";
 import VoiceStatus from "@/components/VoiceStatus";
 import LoginPrompt from "@/components/LoginPrompt";
-import TranslationBar from "@/components/TranslationBar";
 import TopicCard from "@/components/TopicCard";
 import LanguageSelector from "@/components/LanguageSelector";
 import { getSettings } from "@/components/SettingsModal";
@@ -276,151 +275,165 @@ export default function RoomClient() {
   }
 
   return (
-    <main className="flex flex-col h-dvh bg-black/95 overflow-hidden">
+    <main className="flex min-h-screen flex-col items-center justify-center gap-4 p-4">
       <audio ref={audioRef} autoPlay playsInline hidden />
+      <h1 className="text-xl font-bold tracking-tight">QVideoChat</h1>
 
-      {/* Top bar */}
-      <div className="flex items-center justify-between px-4 py-2 bg-black/60 border-b border-white/5 z-10">
-        <div className="flex items-center gap-2">
-          <span className="text-sm text-white/70 font-medium">{pname}</span>
-          <span className={`w-2 h-2 rounded-full ${peer.isConnected ? "bg-green-500" : "bg-red-500"}`} />
-        </div>
-        <div className="flex items-center gap-3">
-          {peer.isConnected && <span className="text-[11px] text-green-400/60">语音已连接</span>}
-          {!faceFound && isLoaded && <span className="text-[10px] text-yellow-400">未检测到人脸</span>}
-          <span className="text-[10px] text-neutral-500">{peer.isConnecting ? "连接中..." : peer.isConnected ? "" : roomReady ? "等待对方加入..." : "等待对方加入..."}</span>
-        </div>
-      </div>
+      {partnerLeft && (
+        <p className="rounded-lg bg-yellow-900/30 px-4 py-2 text-yellow-400 text-sm">对方已离开房间</p>
+      )}
+      {peer.error && (
+        <p className="text-red-400 text-sm">{peer.error}</p>
+      )}
 
-      {/* Partner avatar — full area */}
-      <div className="flex-1 relative flex items-center justify-center bg-black/50">
-        <VrmAvatar blendshapeRef={peer.remoteBlendshapeRef} size={340} muted={partnerLeft} className="self-center" />
+      {topicText && <TopicCard text={topicText} category={topicCategory} />}
 
-        {/* Topic card overlay */}
-        {topicText && (
-          <div className="absolute top-4 left-0 right-0 mx-auto flex justify-center z-20">
-            <TopicCard text={topicText} category={topicCategory} />
-          </div>
-        )}
+      {friendStatus === "received" && !partnerLeft && (
+        <p className="rounded-lg bg-green-900/30 px-4 py-2 text-green-400 text-xs">{pname} 想加你为好友</p>
+      )}
 
-        {/* Partner left overlay */}
-        {partnerLeft && (
-          <div className="absolute inset-0 flex items-center justify-center bg-black/50 z-20">
-            <p className="rounded-lg bg-yellow-900/40 px-4 py-2 text-yellow-400 text-sm">对方已离开房间</p>
-          </div>
-        )}
+      <div className="flex flex-row items-start gap-6">
+        {/* My avatar */}
+        <div className="flex flex-col items-center gap-2 w-72">
+          {isCameraOn ? (
+            <VrmAvatar blendshapeRef={blendshapeRef} size={260} />
+          ) : (
+            <div className="rounded-2xl bg-neutral-950 flex items-center justify-center" style={{ width: 260, height: 260 }}>
+              <span className="text-neutral-600 text-5xl">📷</span>
+            </div>
+          )}
+          <VoiceStatus stream={peer.localAudioStream} label={getSettings().showId ? `${uname} (你)` : "匿名用户"} />
 
-        {/* Translation subtitle — bottom of partner area */}
-        <TranslationBar
-          sourceText={peerSourceText}
-          translatedText={peerTranslatedText}
-          sourceLang={targetLang}
-          targetLang={sourceLang}
-        />
-
-        {/* My PiP avatar */}
-        <div className="absolute bottom-4 right-4 z-20">
-          <div className="relative">
-            {isCameraOn ? (
-              <VrmAvatar blendshapeRef={blendshapeRef} size={120} />
-            ) : (
-              <div className="rounded-xl bg-neutral-900/80 border border-neutral-700 flex items-center justify-center" style={{ width: 120, height: 120 }}>
-                <span className="text-neutral-500 text-3xl">📷</span>
-              </div>
-            )}
-            {/* Mic indicator on PiP */}
-            <div className={`absolute top-2 left-2 w-3 h-3 rounded-full border-2 border-black/40 ${peer.isMicOn ? "bg-green-500" : "bg-red-500"}`} />
-          </div>
+          {/* My speech subtitle */}
+          {subtitleEnabled && myTranslatedText && (
+            <div className="w-full rounded-lg bg-neutral-900/80 border border-neutral-800 px-3 py-2 text-center">
+              {mySourceText && (
+                <p className="text-neutral-400 text-[11px] leading-snug break-words">{mySourceText}</p>
+              )}
+              <p className="text-green-400 text-[11px] leading-snug break-words">
+                {myTranslatedText}
+              </p>
+            </div>
+          )}
         </div>
 
-        {/* Voice status bars */}
-        <div className="absolute bottom-4 left-4 z-20 flex flex-col gap-1">
-          <VoiceStatus stream={peer.remoteAudioStream} label={pname} muted={partnerLeft} />
+        {/* Partner avatar */}
+        <div className="flex flex-col items-center gap-2 w-72">
+          <VrmAvatar blendshapeRef={peer.remoteBlendshapeRef} size={260} muted={partnerLeft} />
+          <VoiceStatus stream={peer.remoteAudioStream} label={`${pname} (对方)`} muted={partnerLeft} />
+
+          {/* Partner speech subtitle */}
+          {subtitleEnabled && peerTranslatedText && (
+            <div className="w-full rounded-lg bg-neutral-900/80 border border-neutral-800 px-3 py-2 text-center">
+              {peerSourceText && (
+                <p className="text-neutral-400 text-[11px] leading-snug break-words">{peerSourceText}</p>
+              )}
+              <p className="text-green-400 text-[11px] leading-snug break-words">
+                {peerTranslatedText}
+              </p>
+            </div>
+          )}
         </div>
       </div>
 
-      {/* Status bar */}
-      <div className="flex items-center justify-center gap-4 px-4 py-1.5 bg-black/60 border-t border-white/5 z-10">
-        {peer.error && <p className="text-red-400 text-xs">{peer.error}</p>}
-        {friendStatus === "received" && !partnerLeft && (
-          <p className="text-green-400 text-xs">{pname} 想加你为好友</p>
+      <div className="flex items-center gap-3">
+        <span className={`text-xs ${peer.isConnected ? "text-green-400" : "text-neutral-500"}`}>
+          {peer.isConnecting ? "连接中..." : peer.isConnected ? "已连接" : roomReady ? "建立连接..." : "等待对方加入..."}
+        </span>
+        <span className="text-xs text-neutral-600">ICE: {peer.iceState}</span>
+        {!faceFound && isLoaded && (
+          <span className="text-xs text-yellow-400">未检测到人脸</span>
         )}
-        {friendStatus === "sent" && <p className="text-neutral-500 text-xs">好友请求已发送</p>}
-        {friendStatus === "friends" && <p className="text-green-400 text-xs">已是好友</p>}
+      </div>
 
-        {peer.isConnected && friendStatus === "none" && (
-          <button onClick={handleAddFriend} className="text-[10px] text-neutral-400 hover:text-white underline underline-offset-2">
-            + 添加好友
+      {cameraEverLoaded.current && (
+        <div className="flex gap-2">
+          <button
+            onClick={toggleCamera}
+            className={`w-9 h-9 rounded-full flex items-center justify-center text-sm transition ${
+              isCameraOn ? "bg-neutral-800 border border-neutral-600 text-neutral-300 hover:bg-neutral-700" : "bg-red-600/30 border border-red-700 text-red-400"
+            }`}>
+            📷
           </button>
-        )}
-        {peer.isConnected && friendStatus === "received" && (
-          <button onClick={handleAcceptFriend} className="rounded bg-green-700 px-2 py-0.5 text-[10px] text-white">
-            接受好友请求
+          <button
+            onClick={peer.toggleMic}
+            className={`w-9 h-9 rounded-full flex items-center justify-center text-sm transition ${
+              peer.isMicOn ? "bg-neutral-800 border border-neutral-600 text-neutral-300 hover:bg-neutral-700" : "bg-red-600/30 border border-red-700 text-red-400"
+            }`}>
+            🎙
           </button>
+        </div>
+      )}
+
+      <div className="flex items-center gap-3 flex-wrap justify-center">
+        {peer.isConnected && (
+          <LanguageSelector
+            sourceLang={sourceLang}
+            targetLang={targetLang}
+            subtitleEnabled={subtitleEnabled}
+            onSourceChange={handleSourceLangChange}
+            onTargetChange={handleTargetLangChange}
+            onSubtitleToggle={handleSubtitleToggle}
+          />
         )}
       </div>
 
-      {/* Bottom controls */}
-      <div className="flex items-center justify-center gap-3 px-4 py-3 bg-black/60 border-t border-white/5 z-10">
-        {cameraEverLoaded.current && (
-          <>
-            <button onClick={toggleCamera}
-              className={`w-9 h-9 rounded-full flex items-center justify-center text-sm ${
-                isCameraOn ? "bg-white/10 border border-white/20 text-white" : "bg-red-600/30 border border-red-700 text-red-400"
-              }`}>
-              📷
+      {peer.isConnected && (
+        <p className="text-xs text-green-400/60">语音已连接</p>
+      )}
+
+      {peer.isConnected && friendStatus === "none" && (
+        <button onClick={handleAddFriend}
+          className="rounded-lg bg-neutral-800 border border-neutral-700 px-4 py-1.5 text-xs text-neutral-300 hover:border-neutral-500 hover:text-white transition">
+          + 添加好友
+        </button>
+      )}
+
+      {peer.isConnected && friendStatus === "received" && (
+        <button onClick={handleAcceptFriend}
+          className="rounded-lg bg-green-700 px-4 py-1.5 text-xs text-white hover:bg-green-600">
+          接受好友请求
+        </button>
+      )}
+
+      {friendStatus === "sent" && (
+        <p className="text-xs text-neutral-500">好友请求已发送</p>
+      )}
+
+      {friendStatus === "friends" && (
+        <p className="text-xs text-green-400">已是好友</p>
+      )}
+
+      {showFriendPrompt && partnerLeft && (
+        <div className="flex items-center gap-3 rounded-lg bg-neutral-800/60 px-4 py-3">
+          <span className="text-xs text-neutral-400">聊得开心吗？</span>
+          {friendStatus === "none" && (
+            <button onClick={handleAddFriend} className="rounded-lg bg-white text-black px-3 py-1 text-xs font-medium hover:bg-neutral-200">
+              加为好友
             </button>
-            <button onClick={peer.toggleMic}
-              className={`w-9 h-9 rounded-full flex items-center justify-center text-sm ${
-                peer.isMicOn ? "bg-white/10 border border-white/20 text-white" : "bg-red-600/30 border border-red-700 text-red-400"
-              }`}>
-              🎙
-            </button>
-          </>
-        )}
-
-        <LanguageSelector
-          sourceLang={sourceLang}
-          targetLang={targetLang}
-          subtitleEnabled={subtitleEnabled}
-          onSourceChange={handleSourceLangChange}
-          onTargetChange={handleTargetLangChange}
-          onSubtitleToggle={handleSubtitleToggle}
-        />
-
-        <div className="flex gap-2 ml-2">
-          <button onClick={handleHangup} className="w-10 h-10 rounded-full bg-red-600/70 border border-red-500 flex items-center justify-center text-lg hover:bg-red-500 transition">
-            ✕
-          </button>
-          <button onClick={handleNext} className="w-10 h-10 rounded-full bg-white/10 border border-white/20 flex items-center justify-center text-lg hover:bg-white/20 transition">
-            →
-          </button>
+          )}
+          {friendStatus === "sent" && <span className="text-xs text-green-400">已发送</span>}
+          {friendStatus === "friends" && <span className="text-xs text-green-400">已是好友</span>}
         </div>
+      )}
 
+      <div className="flex gap-4 mt-2">
+        <button onClick={handleHangup}
+          className="rounded-lg bg-neutral-800 border border-neutral-700 px-4 py-2 text-sm text-neutral-300 hover:border-red-600 hover:text-red-400 transition">
+          挂断
+        </button>
+        <button onClick={handleNext}
+          className="rounded-lg bg-white text-black px-4 py-2 text-sm font-medium hover:bg-neutral-200 transition">
+          下一个
+        </button>
         {!reported && (
           <button onClick={() => { reportUser(puid, roomId, ""); setReported(true); }}
-            className="text-[9px] text-red-600/60 hover:text-red-400 underline underline-offset-2 ml-1">
+            className="text-[10px] text-red-600 hover:text-red-400 underline underline-offset-2">
             举报
           </button>
         )}
-        {reported && <span className="text-[9px] text-neutral-600 ml-1">已举报</span>}
+        {reported && <span className="text-[10px] text-neutral-600">已举报</span>}
       </div>
-
-      {/* Modals */}
-      {showFriendPrompt && partnerLeft && (
-        <div className="absolute bottom-24 left-0 right-0 mx-auto w-fit z-30">
-          <div className="flex items-center gap-3 rounded-lg bg-neutral-800/90 px-4 py-2.5 shadow-lg">
-            <span className="text-xs text-neutral-400">聊得开心吗？</span>
-            {friendStatus === "none" && (
-              <button onClick={handleAddFriend} className="rounded-lg bg-white text-black px-3 py-1 text-xs font-medium">
-                加为好友
-              </button>
-            )}
-            {friendStatus === "sent" && <span className="text-xs text-green-400">已发送</span>}
-            {friendStatus === "friends" && <span className="text-xs text-green-400">已是好友</span>}
-          </div>
-        </div>
-      )}
 
       <LoginPrompt show={showLoginModal} onClose={() => setShowLoginModal(false)} />
     </main>
