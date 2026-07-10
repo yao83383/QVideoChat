@@ -15,6 +15,11 @@ export interface TranslationMessage {
   sourceText?: string;
   sourceLang: string;
   targetLang: string;
+  isFinal?: boolean;
+  /** Sender signals whether they will follow up with a translation.
+   *  true  = wait for our translated text (sender is translating locally)
+   *  false = we won't translate, receiver should if they can (mobile sender) */
+  pendingTranslate?: boolean;
 }
 
 export interface UsePeerReturn {
@@ -27,9 +32,13 @@ export interface UsePeerReturn {
   iceState: string;
   error: string | null;
   isMicOn: boolean;
+  /** Remote peer's mic state — surfaced so UI can show a mute badge over their avatar. */
+  remoteMicOn: boolean;
   toggleMic: () => void;
   /** Send a translated subtitle to the peer via DataChannel. */
   sendTranslation: (msg: TranslationMessage) => void;
+  /** Subscribe to remote subtitle messages. Returns an unsubscribe fn. */
+  onRemoteTranslation: (cb: (msg: TranslationMessage) => void) => () => void;
   /** Initializes the voice + PC + data channel handlers. Await this before any signalling. */
   initConnection: (asInitiator: boolean) => Promise<void>;
   /** Called by the initiator once the room is ready to send the offer. */
@@ -49,6 +58,7 @@ export function usePeer(
   const translateDcRef = useRef<RTCDataChannel | null>(null);
   const remoteBlendshapeRef = useRef<BlendshapeFrame | null>(null);
   const remoteTranslationRef = useRef<TranslationMessage | null>(null);
+  const translationSubsRef = useRef<Set<(msg: TranslationMessage) => void>>(new Set());
   const sendTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const signalingRef = useRef(signaling);
   signalingRef.current = signaling;
@@ -60,6 +70,9 @@ export function usePeer(
   const [iceState, setIceState] = useState("idle");
   const [error, setError] = useState<string | null>(null);
   const [isMicOn, setIsMicOn] = useState(true);
+  const [remoteMicOn, setRemoteMicOn] = useState(true);
+  const isMicOnRef = useRef(isMicOn);
+  useEffect(() => { isMicOnRef.current = isMicOn; }, [isMicOn]);
 
   const setupBlendshapeChannel = useCallback((dc: RTCDataChannel) => {
     dcRef.current = dc;
@@ -90,19 +103,41 @@ export function usePeer(
 
   const setupTranslationChannel = useCallback((dc: RTCDataChannel) => {
     translateDcRef.current = dc;
+    dc.onopen = () => {
+      // Announce our current mic state so the peer's UI reflects it right away.
+      try {
+        dc.send(JSON.stringify({ type: "mic", on: isMicOnRef.current ? 1 : 0 }));
+      } catch { /* channel died */ }
+    };
     dc.onmessage = (event) => {
       try {
         const data = JSON.parse(event.data);
+        if (data.type === "mic") {
+          setRemoteMicOn(data.on === 1);
+          return;
+        }
         if (data.text || data.st) {
-          remoteTranslationRef.current = {
+          const msg: TranslationMessage = {
             text: data.text || "",
             sourceText: data.st || "",
             sourceLang: data.sl || "",
             targetLang: data.tl || "",
+            isFinal: data.f !== 0,
+            pendingTranslate: data.p === 1,
           };
+          remoteTranslationRef.current = msg;
+          // Notify subscribers synchronously so nothing is lost between polls.
+          for (const cb of translationSubsRef.current) {
+            try { cb(msg); } catch { /* subscriber error — swallow */ }
+          }
         }
       } catch { /* ignore */ }
     };
+  }, []);
+
+  const onRemoteTranslation = useCallback((cb: (msg: TranslationMessage) => void) => {
+    translationSubsRef.current.add(cb);
+    return () => { translationSubsRef.current.delete(cb); };
   }, []);
 
   const cleanup = useCallback(() => {
@@ -113,6 +148,7 @@ export function usePeer(
     remoteBlendshapeRef.current = null;
     remoteTranslationRef.current = null;
     setRemoteAudioStream(null); setLocalAudioStream(null); setIsConnected(false); setIsConnecting(false); setIceState("idle");
+    setRemoteMicOn(true);
   }, []);
 
   const sendTranslation = useCallback((msg: TranslationMessage) => {
@@ -122,6 +158,8 @@ export function usePeer(
         st: msg.sourceText || "",
         sl: msg.sourceLang,
         tl: msg.targetLang,
+        f: msg.isFinal === false ? 0 : 1,
+        p: msg.pendingTranslate ? 1 : 0,
       }));
     }
   }, []);
@@ -153,7 +191,11 @@ export function usePeer(
       },
       onIceState: (s) => setIceState(s),
       onStats: (st) => {
-        console.log("[voice.stats]", JSON.stringify(st));
+        // Only log stats if something looks off — routine heartbeats drown out
+        // ASR/worker debug logs during subtitle troubleshooting.
+        if ((st.packetsLost ?? 0) > 0 || st.remoteTrackMuted) {
+          console.warn("[voice.stats]", JSON.stringify(st));
+        }
       },
       log: (msg) => console.log("[voice]", msg),
     });
@@ -223,6 +265,12 @@ export function usePeer(
     const newState = !isMicOn;
     voice.setMicEnabled(newState);
     setIsMicOn(newState);
+    // Broadcast mic state so peer's UI reflects it.
+    if (translateDcRef.current?.readyState === "open") {
+      try {
+        translateDcRef.current.send(JSON.stringify({ type: "mic", on: newState ? 1 : 0 }));
+      } catch { /* channel died */ }
+    }
   }, [isMicOn]);
 
   useEffect(() => () => cleanup(), [cleanup]);
@@ -230,7 +278,7 @@ export function usePeer(
   return {
     remoteBlendshapeRef, remoteTranslationRef, remoteAudioStream, localAudioStream,
     isConnected, isConnecting, iceState, error,
-    isMicOn, toggleMic, sendTranslation,
+    isMicOn, remoteMicOn, toggleMic, sendTranslation, onRemoteTranslation,
     initConnection, startAsInitiator,
     handleIncomingOffer, handleIncomingAnswer, handleIncomingIce,
     disconnect: cleanup,

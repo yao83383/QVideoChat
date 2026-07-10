@@ -1,3 +1,4 @@
+import { readFileSync, existsSync } from "node:fs";
 import express from "express";
 import { createServer } from "node:http";
 import { Server } from "socket.io";
@@ -10,6 +11,25 @@ import { router as usersRouter } from "./routes/users.js";
 import { router as friendsRouter } from "./routes/friends.js";
 import { router as historyRouter } from "./routes/history.js";
 import { router as reportsRouter } from "./routes/reports.js";
+import { setupAsrProxy } from "./asrProxy.js";
+
+// Load .env.production if present. Node 20.6+ has process.loadEnvFile()
+// natively; we fall back to a small manual parser for older runtimes so we
+// don't need dotenv as a dependency.
+(function loadEnv(path: string) {
+  if (!existsSync(path)) return;
+  try {
+    (process as any).loadEnvFile?.(path);
+    if ((process as any).loadEnvFile) return;
+  } catch { /* fall through */ }
+  const content = readFileSync(path, "utf-8");
+  for (const line of content.split(/\r?\n/)) {
+    const m = line.trim().match(/^([A-Z_][A-Z0-9_]*)\s*=\s*(.*)$/);
+    if (m && !process.env[m[1]]) {
+      process.env[m[1]] = m[2].replace(/^["']|["']$/g, "");
+    }
+  }
+})(".env.production");
 import {
   getDb,
   createMatchRecord,
@@ -33,6 +53,10 @@ app.use("/api/history", historyRouter);
 app.use("/api/reports", reportsRouter);
 
 const httpServer = createServer(app);
+// Register the Tencent ASR proxy BEFORE socket.io attaches. Both need to
+// listen on the same http server's `upgrade` event, and socket.io destroys
+// sockets whose path doesn't match /socket.io/, so we must hijack /asr first.
+setupAsrProxy(httpServer);
 const io = new Server(httpServer, {
   cors: {
     origin: "*",

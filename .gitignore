@@ -2,6 +2,7 @@ node_modules/
 .next/
 dist/
 .env.local
+.env.production
 *.log
 .DS_Store
 deploy.tar.gz
@@ -16,6 +17,7 @@ server/data/
 client/public/wasm/*.wasm
 client/public/models/*.task
 client/public/models/onnx/
+client/public/onnx-wasm/
 
 # Next.js static export
 client/out/
