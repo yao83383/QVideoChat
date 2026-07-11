@@ -1,10 +1,12 @@
 #!/bin/bash
-# Download AI models for offline bundling (Capacitor app).
+# Download translation models for offline bundling (Capacitor app).
 # Run this before npx cap sync to bundle models into the app.
 #
 # Models:
-#   whisper-tiny (~150MB) — ASR fallback
-#   nllb-200-distilled-600M (~2.5GB) — translation
+#   opus-mt-{zh,en,ja,ko}-en / en-{zh,ja} (~78MB each) — pairwise translation
+#
+# ASR is NOT downloaded here — it uses the sherpa-onnx WASM bundle
+# (client/public/sherpa-asr/), fetched by scripts/download-sherpa.sh.
 #
 # Note: transformers.js auto-downloads models from Hugging Face CDN
 #       at runtime. This script pre-downloads them for offline use.
@@ -32,16 +34,21 @@ download_model() {
 }
 
 # Core models — uncomment to download
-# download_model "Xenova/whisper-tiny"
-# download_model "Xenova/nllb-200-distilled-600M"
+# download_model "Xenova/opus-mt-zh-en"
+# download_model "Xenova/opus-mt-en-zh"
+# download_model "Xenova/opus-mt-ja-en"
+# download_model "Xenova/opus-mt-en-jap"
+# download_model "Xenova/opus-mt-ko-en"
 
 echo ""
 echo "Models directory: $MODELS_DIR"
 echo ""
-echo "Available models to download:"
-echo "  Xenova/whisper-tiny              (~150MB, ASR)"
-echo "  Xenova/nllb-200-distilled-600M   (~2.5GB, translation)"
+echo "Available translation models to download (~78MB each):"
+echo "  Xenova/opus-mt-zh-en"
+echo "  Xenova/opus-mt-en-zh"
+echo "  Xenova/opus-mt-ja-en"
+echo "  Xenova/opus-mt-en-jap"
+echo "  Xenova/opus-mt-ko-en"
 echo ""
-echo "To download, uncomment the download_model lines in this script"
-echo "or run manually:"
-echo "  git clone --depth 1 https://huggingface.co/Xenova/whisper-tiny $MODELS_DIR/Xenova/whisper-tiny"
+echo "To download, uncomment the download_model lines in this script."
+echo "For ASR, run scripts/download-sherpa.sh instead (~209MB WASM bundle)."

@@ -18,6 +18,7 @@ client/public/wasm/*.wasm
 client/public/models/*.task
 client/public/models/onnx/
 client/public/onnx-wasm/
+client/public/sherpa-asr/
 
 # Next.js static export
 client/out/

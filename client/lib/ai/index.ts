@@ -3,20 +3,11 @@
  * Model loading and ONNX inference all happen inside translate.worker.ts
  * so the main thread stays free for React / avatar rendering / WebRTC.
  *
- * ASR (whisper-tiny) still runs on the main thread here as a fallback for
- * browsers without Web Speech API. In practice Web Speech is the primary
- * ASR engine, so this rarely fires.
+ * ASR lives elsewhere: sherpa-onnx WASM in lib/ai/sherpa-engine.ts. This file
+ * is translation-only.
  */
 
-import { pipeline, env } from '@huggingface/transformers';
-
-type AIPipeline = any;
-
-// ----- model paths (main thread, ASR only) -----
-
 const BASE_PATH = process.env.NEXT_PUBLIC_BASE_PATH || '';
-env.localModelPath = `${BASE_PATH}/models/onnx/`;
-env.allowRemoteModels = true;
 
 // ============================================================
 // Web Worker RPC — translation
@@ -106,7 +97,7 @@ function handleWorkerMessage(e: MessageEvent) {
     handleProgress(msg);
     return;
   }
-  if (msg.type === 'result' || msg.type === 'error' || msg.type === 'preloaded' || msg.type === 'asr-result') {
+  if (msg.type === 'result' || msg.type === 'error' || msg.type === 'preloaded') {
     const cb = pending.get(msg.id);
     if (cb) { pending.delete(msg.id); cb(msg); }
     return;
@@ -199,7 +190,7 @@ function send<T = any>(msg: any, timeoutMs = 60_000): Promise<T> {
 }
 
 // ============================================================
-// Public API — same shape as before, backed by the worker
+// Public API
 // ============================================================
 
 export function preloadPair(sourceLang: string, targetLang: string): Promise<void> {
@@ -222,65 +213,6 @@ export function translateInWorker(
   return send<{ text: string }>({ type: 'translate', text, src, tgt }, 30_000).then((r) => r.text);
 }
 
-// -------- ASR (whisper) --------
-
-export function preloadASR(): Promise<void> {
-  return send<{ ok: boolean }>({ type: 'asr-preload' }, 180_000).then(() => undefined);
-}
-
-export function transcribeInWorker(
-  audio: Float32Array,
-  lang: string,
-): Promise<string> {
-  // Send the raw Float32Array as a transferable so we don't copy it.
-  const w = ensureWorker();
-  const id = ++msgSeq;
-  return new Promise<string>((resolve, reject) => {
-    const timer = setTimeout(() => {
-      if (pending.has(id)) {
-        pending.delete(id);
-        reject(new Error('asr timeout'));
-      }
-    }, 90_000);
-    pending.set(id, (payload) => {
-      clearTimeout(timer);
-      if (payload.type === 'error') reject(new Error(payload.error || 'asr error'));
-      else resolve(payload.text || '');
-    });
-    workerReady!.then(() =>
-      w.postMessage({ type: 'asr', id, audio, lang }),
-    );
-  });
-}
-
-// Legacy shims — no direct pipeline handles cross the thread boundary.
-export async function loadDirectPair(
-  sourceLang: string,
-  targetLang: string,
-): Promise<AIPipeline | null> {
-  await preloadPair(sourceLang, targetLang);
-  return null;
-}
-
-export async function initTranslateForPair(
-  sourceLang: string,
-  targetLang: string,
-): Promise<AIPipeline | null> {
-  return loadDirectPair(sourceLang, targetLang);
-}
-
-export async function runTranslation(_p: AIPipeline, _text: string): Promise<string> {
-  throw new Error('runTranslation is deprecated — use translateInWorker via translateText');
-}
-
-export function getPipelineKey(sourceLang: string, targetLang: string): string {
-  const src = (sourceLang || '').split('-')[0];
-  const tgt = (targetLang || '').split('-')[0];
-  return `tr-${src}->${tgt}`;
-}
-
-export function getModelSize(_key: string): string { return '~78MB'; }
-
 export function disposeModels(): void {
   if (worker) {
     worker.terminate();
@@ -291,31 +223,4 @@ export function disposeModels(): void {
     activePairs.clear();
     rebuildState();
   }
-}
-
-// ============================================================
-// ASR (whisper-tiny) — main-thread fallback, rarely used
-// ============================================================
-
-const asrPipelines: Record<string, AIPipeline> = {};
-const asrLoading: Record<string, Promise<AIPipeline>> = {};
-
-export async function initASR(): Promise<AIPipeline> {
-  if (asrPipelines.asr) return asrPipelines.asr;
-  const existing = asrLoading.asr;
-  if (existing) return existing;
-
-  console.log('[AI] loading ASR pipeline (whisper-tiny ~39MB)...');
-  asrLoading.asr = pipeline('automatic-speech-recognition', 'Xenova/whisper-tiny', {
-    device: 'wasm',
-  }).then((p) => {
-    asrPipelines.asr = p;
-    delete asrLoading.asr;
-    return p;
-  }).catch((e) => {
-    delete asrLoading.asr;
-    throw e;
-  });
-
-  return asrLoading.asr;
 }

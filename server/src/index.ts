@@ -11,7 +11,6 @@ import { router as usersRouter } from "./routes/users.js";
 import { router as friendsRouter } from "./routes/friends.js";
 import { router as historyRouter } from "./routes/history.js";
 import { router as reportsRouter } from "./routes/reports.js";
-import { setupAsrProxy } from "./asrProxy.js";
 
 // Load .env.production if present. Node 20.6+ has process.loadEnvFile()
 // natively; we fall back to a small manual parser for older runtimes so we
@@ -53,10 +52,6 @@ app.use("/api/history", historyRouter);
 app.use("/api/reports", reportsRouter);
 
 const httpServer = createServer(app);
-// Register the Tencent ASR proxy BEFORE socket.io attaches. Both need to
-// listen on the same http server's `upgrade` event, and socket.io destroys
-// sockets whose path doesn't match /socket.io/, so we must hijack /asr first.
-setupAsrProxy(httpServer);
 const io = new Server(httpServer, {
   cors: {
     origin: "*",
@@ -68,6 +63,12 @@ const matchQueue = new MatchQueue();
 const roomManager = new RoomManager();
 const socketUsers = new Map<string, string>(); // socketId -> userId
 const activeSessions = new Map<string, string>(); // userId -> socketId
+
+// Grace period for socket disconnects — lets the same userId rejoin (e.g. after
+// a page refresh) without tearing down the room and the peer's PC state.
+// key = `${roomId}:${userId}`, value = pending "really-close" timer.
+const RECONNECT_GRACE_MS = 15000;
+const pendingDisconnects = new Map<string, ReturnType<typeof setTimeout>>();
 
 // Isolated audio-test rooms — completely independent from matchQueue.
 // Used by /audio-test client page to debug WebRTC audio without any other logic.
@@ -168,8 +169,45 @@ io.on("connection", (socket) => {
     }
     kickOldSession(data.userId, socket.id);
     socketUsers.set(socket.id, data.userId);
+
+    // Detect rejoin vs first join: if this user was already claimed into the
+    // room (page refresh, transient disconnect), we skip the "first ready" path
+    // and instead nudge the partner to rebuild their PC.
+    const isRejoin = room.joinedUserIds.includes(data.userId);
+
     const ready = roomManager.updateSocket(data.roomId, data.userId, socket.id);
-    console.log(`[room:join] ${data.userId} -> socket ${socket.id} room ${data.roomId}`);
+    console.log(`[room:join] ${data.userId} -> socket ${socket.id} room ${data.roomId} rejoin=${isRejoin}`);
+
+    if (isRejoin) {
+      // Cancel any pending "really close the room" timer for this user.
+      const key = `${data.roomId}:${data.userId}`;
+      const pending = pendingDisconnects.get(key);
+      if (pending) {
+        clearTimeout(pending);
+        pendingDisconnects.delete(key);
+      }
+
+      // Refetch the room — updateSocket may have refreshed the partner's socketId
+      // in the same tick if they also just rejoined.
+      const fresh = roomManager.get(data.roomId);
+      if (!fresh) return;
+      const partner = fresh.users.find((u) => u.userId !== data.userId);
+      if (partner) {
+        io.to(partner.socketId).emit("partner:rejoined");
+      }
+
+      // Restart the WebRTC handshake — both peers reset their PC and the
+      // deterministic initiator (lexicographically smaller userId) re-offers.
+      const initiatorUserId = fresh.users[0].userId < fresh.users[1].userId
+        ? fresh.users[0].userId : fresh.users[1].userId;
+      const initiator = fresh.users.find((u) => u.userId === initiatorUserId);
+      if (initiator) {
+        io.to(initiator.socketId).emit("room:ready");
+        console.log(`[room:ready] (rejoin) -> initiator ${initiatorUserId}`);
+      }
+      return;
+    }
+
     if (ready) {
       const initiatorUserId = room.users[0].userId < room.users[1].userId
         ? room.users[0].userId : room.users[1].userId;
@@ -242,6 +280,13 @@ io.on("connection", (socket) => {
     if (partner) {
       io.to(partner.socketId).emit("partner:left");
     }
+    // Cancel any pending grace-period timers for either user in this room —
+    // explicit leave supersedes the "wait 15s for rejoin" path.
+    for (const u of room.users) {
+      const key = `${data.roomId}:${u.userId}`;
+      const t = pendingDisconnects.get(key);
+      if (t) { clearTimeout(t); pendingDisconnects.delete(key); }
+    }
     endMatchRecord(data.roomId);
     roomManager.remove(data.roomId);
     console.log(`[room:leave] ${data.roomId}`);
@@ -303,14 +348,35 @@ io.on("connection", (socket) => {
     matchQueue.removeBySocket(socket.id);
 
     const room = roomManager.getBySocket(socket.id);
-    if (room && roomManager.isClaimed(room.roomId)) {
+    if (room && roomManager.isClaimed(room.roomId) && userId) {
       const partner = room.users.find((u) => u.socketId !== socket.id);
       if (partner) {
-        io.to(partner.socketId).emit("partner:left");
+        io.to(partner.socketId).emit("partner:disconnected");
       }
-      endMatchRecord(room.roomId);
-      roomManager.remove(room.roomId);
-      console.log(`[disconnect cleanup] ${room.roomId}`);
+      // Give the user 15s to rejoin (page refresh, transient network). Only
+      // then do we tear the room down and notify the partner it's really over.
+      const roomId = room.roomId;
+      const key = `${roomId}:${userId}`;
+      const existing = pendingDisconnects.get(key);
+      if (existing) clearTimeout(existing);
+      const timer = setTimeout(() => {
+        pendingDisconnects.delete(key);
+        const stillThere = roomManager.get(roomId);
+        if (!stillThere) return; // already cleaned up (e.g. explicit room:leave)
+        // Was the user's socket refreshed in the meantime? updateSocket() would
+        // have cleared the timer via room:join; if we're here, they didn't rejoin.
+        const stillDisconnected = !stillThere.users.some((u) => u.userId === userId && socketUsers.has(u.socketId));
+        if (!stillDisconnected) return;
+        const currentPartner = stillThere.users.find((u) => u.userId !== userId);
+        if (currentPartner) {
+          io.to(currentPartner.socketId).emit("partner:left");
+        }
+        endMatchRecord(roomId);
+        roomManager.remove(roomId);
+        console.log(`[disconnect cleanup after grace] ${roomId}`);
+      }, RECONNECT_GRACE_MS);
+      pendingDisconnects.set(key, timer);
+      console.log(`[disconnect pending] ${roomId} user=${userId} grace=${RECONNECT_GRACE_MS}ms`);
     }
 
     // Clean up test room membership

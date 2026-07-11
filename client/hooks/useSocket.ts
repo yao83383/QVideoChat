@@ -15,6 +15,9 @@ export interface MatchEvents {
   onFriendAccepted?: (data: { userId: string }) => void;
   onSessionKick?: (data: { message: string }) => void;
   onTopic?: (data: { text: string; category: string }) => void;
+  onRoomError?: (data: { message: string }) => void;
+  onPartnerDisconnected?: () => void;
+  onPartnerRejoined?: () => void;
 }
 
 export interface SignalEvents {
@@ -63,7 +66,10 @@ export function useSocket(
     socket.on("match:waiting", () => matchEventsRef.current.onWaiting());
     socket.on("match:found", (data) => matchEventsRef.current.onFound(data));
     socket.on("partner:left", () => matchEventsRef.current.onPartnerLeft());
+    socket.on("partner:disconnected", () => matchEventsRef.current.onPartnerDisconnected?.());
+    socket.on("partner:rejoined", () => matchEventsRef.current.onPartnerRejoined?.());
     socket.on("room:ready", () => matchEventsRef.current.onReady());
+    socket.on("room:error", (data) => matchEventsRef.current.onRoomError?.(data));
 
     socket.on("signal:offer", (data) => signalEventsRef.current.onOffer(data));
     socket.on("signal:answer", (data) => signalEventsRef.current.onAnswer(data));

@@ -8,6 +8,10 @@
  *   in  { type: 'translate', id, text, src, tgt }       → { type: 'result', id, text }
  *                                                        | { type: 'error', id, error }
  *   out { type: 'progress',  pair, status, loaded?, total?, file? }
+ *
+ * ASR does NOT live here — sherpa-onnx WASM in lib/ai/sherpa-engine.ts runs
+ * on the main thread (its own emscripten workers). Only translation crosses
+ * this boundary.
  */
 
 /// <reference lib="webworker" />
@@ -26,21 +30,9 @@ const TRANSLATE_MODELS: Record<string, string> = {
 
 const PIVOT_LANG = 'en';
 
-const ASR_MODEL_ID = 'Xenova/whisper-base';
-const LANG_TO_WHISPER: Record<string, string> = {
-  zh: 'chinese',
-  en: 'english',
-  ja: 'japanese',
-  ko: 'korean',
-};
-
 const pipelines: Record<string, AnyPipe> = {};
 const loading: Record<string, Promise<AnyPipe | null>> = {};
 const failedPairs: Record<string, string> = {};
-
-let asrPipeline: AnyPipe = null;
-let asrLoading: Promise<AnyPipe | null> | null = null;
-let asrFailure: string | null = null;
 
 // Per-pair serialization: ONNX session can't run two inferences concurrently.
 // Different pairs can still run in parallel.
@@ -171,82 +163,7 @@ async function runPipe(p: AnyPipe, text: string): Promise<string> {
   return result;
 }
 
-// ---------- ASR (whisper) ----------
-
-async function loadASR(): Promise<AnyPipe | null> {
-  if (asrPipeline) return asrPipeline;
-  if (asrLoading) return asrLoading;
-  if (asrFailure) return null;
-
-  log('loading ASR', ASR_MODEL_ID);
-  const t0 = Date.now();
-
-  const asrOpts: any = {
-    device: 'wasm',
-    session_options: { graphOptimizationLevel: 'basic' },
-    use_merged: false,
-    progress_callback: (data: any) => {
-      post({
-        type: 'progress',
-        pair: 'asr',
-        status: data?.status || 'unknown',
-        file: data?.file,
-        loaded: typeof data?.loaded === 'number' ? data.loaded : undefined,
-        total: typeof data?.total === 'number' ? data.total : undefined,
-      });
-    },
-  };
-
-  asrLoading = pipeline('automatic-speech-recognition', ASR_MODEL_ID, asrOpts)
-    .then((p) => {
-      asrPipeline = p;
-      asrLoading = null;
-      log('ASR ready in', Date.now() - t0, 'ms');
-      post({ type: 'progress', pair: 'asr', status: 'done' });
-      return p;
-    })
-    .catch((e) => {
-      const err = e?.message || String(e);
-      log('ASR load FAILED:', err);
-      console.error('[worker] ASR load error:', e);
-      asrLoading = null;
-      asrFailure = err;
-      post({ type: 'progress', pair: 'asr', status: 'error', file: err });
-      return null;
-    });
-
-  return asrLoading;
-}
-
-async function transcribe(audio: Float32Array, lang: string): Promise<string> {
-  const pipe = await loadASR();
-  if (!pipe) {
-    throw new Error(asrFailure || 'ASR pipeline unavailable');
-  }
-  const whisperLang = LANG_TO_WHISPER[lang] || undefined;
-  const t0 = Date.now();
-  log('transcribe input', audio.constructor?.name, audio.length, 'samples');
-  // @huggingface/transformers 4.x whisper pipeline: pass the Float32Array
-  // DIRECTLY (assumed to be 16kHz mono). The older `{ raw, sampling_rate }`
-  // wrapper is Xenova-transformers-only and causes "e.subarray is not a
-  // function" here because the feature extractor tries to call `.subarray`
-  // on what it thought was a raw waveform.
-  const result = await withLock('asr', () => (pipe as any)(
-    audio,
-    {
-      language: whisperLang,
-      task: 'transcribe',
-      // Shorter chunk_length_s tells whisper the max audio length we'll
-      // send, avoiding wasteful mel-spectrogram padding to 30s. Utterances
-      // are capped by VAD at MAX_UTTERANCE_MS = 5s, so 6s is enough headroom.
-      chunk_length_s: 6,
-      return_timestamps: false,
-    },
-  ));
-  const text = String((result as any)?.text || '').trim();
-  log('transcribe', audio.length, 'samples in', Date.now() - t0, 'ms →', text || '(empty)');
-  return text;
-}
+// ---------- translate ----------
 
 async function translate(text: string, src: string, tgt: string): Promise<string> {
   if (!text.trim() || src === tgt) return text;
@@ -370,27 +287,6 @@ ctx.onmessage = async (e: MessageEvent) => {
       post({ type: 'result', id: msg.id, text });
     } catch (err: any) {
       log('translate error:', err?.message || err);
-      post({ type: 'error', id: msg.id, error: err?.message || String(err) });
-    }
-    return;
-  }
-
-  if (msg?.type === 'asr-preload') {
-    try {
-      const p = await loadASR();
-      post({ type: 'preloaded', id: msg.id, ok: !!p });
-    } catch (err: any) {
-      post({ type: 'preloaded', id: msg.id, ok: false, error: err?.message || String(err) });
-    }
-    return;
-  }
-
-  if (msg?.type === 'asr') {
-    try {
-      const text = await transcribe(msg.audio, msg.lang);
-      post({ type: 'asr-result', id: msg.id, text });
-    } catch (err: any) {
-      log('asr error:', err?.message || err);
       post({ type: 'error', id: msg.id, error: err?.message || String(err) });
     }
     return;

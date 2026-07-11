@@ -13,7 +13,7 @@ import { useFaceMesh } from "@/hooks/useFaceMesh";
 import { usePeer } from "@/hooks/usePeer";
 import { useSocket } from "@/hooks/useSocket";
 import { reportUser } from "@/lib/api";
-import { createTencentEngine } from "@/lib/ai/tencent-engine";
+import { createSherpaEngine, preloadSherpa, onSherpaLoadChange, type SherpaLoadState } from "@/lib/ai/sherpa-engine";
 import { translateText, preloadPair } from "@/lib/ai/translate";
 import { onLoadingChange } from "@/lib/ai";
 import type { MatchEvents, SignalEvents } from "@/hooks/useSocket";
@@ -42,6 +42,8 @@ export default function RoomClient() {
   const isInitiator = userId < puid;
 
   const [partnerLeft, setPartnerLeft] = useState(false);
+  const [partnerReconnecting, setPartnerReconnecting] = useState(false);
+  const [rejoinTick, setRejoinTick] = useState(0);
   const [roomReady, setRoomReady] = useState(false);
   const [friendStatus, setFriendStatus] = useState<"none" | "sent" | "received" | "friends">("none");
   const [showFriendPrompt, setShowFriendPrompt] = useState(false);
@@ -63,6 +65,9 @@ export default function RoomClient() {
   const [translateError, setTranslateError] = useState<string | null>(null);
   const [asrError, setAsrError] = useState<string | null>(null);
   const [asrStatus, setAsrStatus] = useState<string>("idle");
+  const [sherpaLoad, setSherpaLoad] = useState<SherpaLoadState>({
+    phase: "idle", loaded: 0, total: 0, percent: 0,
+  });
 
   const { blendshapeRef, isLoaded, isCameraOn, error: camError, step: camStep, faceFound, start, stop, toggleCamera } = useFaceMesh();
   useEffect(() => { start(); return () => stop(); }, []);
@@ -85,7 +90,29 @@ export default function RoomClient() {
     onReady: () => setRoomReady(true),
     onPartnerLeft: () => {
       setPartnerLeft(true);
+      setPartnerReconnecting(false);
       setShowFriendPrompt(true);
+    },
+    onPartnerDisconnected: () => {
+      // Transient — the peer's socket dropped but they have 15s to rejoin.
+      // Don't mark them as gone or pop the friend-request UI yet.
+      setPartnerReconnecting(true);
+    },
+    onPartnerRejoined: () => {
+      // The peer came back within the grace period. Clear the "disconnected"
+      // banner and bump rejoinTick so the init effect rebuilds our PC. Also
+      // reset roomReady so the initiator effect waits for the fresh room:ready
+      // that follows this rejoin — otherwise it would fire before the new PC
+      // has its mic track attached and send an audioless offer.
+      setPartnerReconnecting(false);
+      setPartnerLeft(false);
+      setRoomReady(false);
+      setRejoinTick((t) => t + 1);
+    },
+    onRoomError: () => {
+      // Room was cleaned up before we could rejoin (e.g. grace period expired).
+      // No point staying on the page — send them home.
+      router.push("/");
     },
     onFriendRequest: (data) => {
       if (data.fromUserId === puid) {
@@ -123,18 +150,21 @@ export default function RoomClient() {
     onIceRef.current = peer.handleIncomingIce;
   });
 
-  const initStartedRef = useRef(false);
+  // Guard the init effect: only run once per rejoinTick value. Mount runs at
+  // tick=0; onPartnerRejoined bumps the tick, which lets us re-init a fresh PC
+  // without racing the old one.
+  const initStartedRef = useRef<number>(-1);
   useEffect(() => {
     if (!socket.isConnected || !isLoaded) return;
-    if (initStartedRef.current) return;
-    initStartedRef.current = true;
+    if (initStartedRef.current === rejoinTick) return;
+    initStartedRef.current = rejoinTick;
     (async () => {
       try {
         await peer.initConnection(false);
         socket.joinRoom(roomId, userId);
       } catch { /* error surfaced via peer.error */ }
     })();
-  }, [socket.isConnected, isLoaded, roomId, userId, peer.initConnection, socket.joinRoom]);
+  }, [socket.isConnected, isLoaded, roomId, userId, peer.initConnection, socket.joinRoom, rejoinTick]);
 
   useEffect(() => {
     if (!roomReady || !isInitiator) return;
@@ -256,6 +286,24 @@ export default function RoomClient() {
     });
   }, [subtitleEnabled, sourceLang, targetLang]);
 
+  // Kick off the sherpa-onnx WASM bundle download the moment subtitles are
+  // enabled. It's ~209MB (wasm+data) and only downloads once — the browser
+  // caches it via the /sherpa-asr/ immutable header — so front-loading here
+  // means the mic → recognizer path in the effect below sees a hot module.
+  useEffect(() => {
+    if (!subtitleEnabled) return;
+    console.log('[room] preloadSherpa');
+    preloadSherpa().catch((e) => {
+      console.error('[room] preloadSherpa failed:', e);
+      setAsrError(`识别模型加载失败: ${e?.message || e}`);
+    });
+  }, [subtitleEnabled]);
+
+  // Subscribe to sherpa download/init progress so we can show a real progress
+  // bar in the subtitle panel instead of a mysterious "starting..." spinner
+  // while ~209MB fetches.
+  useEffect(() => onSherpaLoadChange(setSherpaLoad), []);
+
   // Send-side pipeline: mic → Web Speech (interim + final) → translate → peer.
   // ASR only depends on subtitleEnabled + peer connected + sourceLang.
   // targetLang changes must NOT rebuild the recognizer (would drop mid-sentence).
@@ -288,15 +336,16 @@ export default function RoomClient() {
     let cancelled = false;
     let inflightSeq = 0;
 
-    const engine = createTencentEngine(
+    const engine = createSherpaEngine(
       stream,
       sourceLang,
       (result) => {
         if (cancelled) return;
         const tgt = targetLangRef.current;
 
-        // Tencent emits both interim and final segments. Show all as source
-        // text; only translate on final.
+        // sherpa emits both interim (updating hypothesis) and final
+        // (isEndpoint) segments. Show all as source text; only translate on
+        // final.
         setMySourceText(result.text);
         sendTranslationRef.current({
           text: "",
@@ -426,6 +475,9 @@ export default function RoomClient() {
       {partnerLeft && (
         <p className="rounded-lg bg-yellow-900/30 px-4 py-2 text-yellow-400 text-sm">对方已离开房间</p>
       )}
+      {partnerReconnecting && !partnerLeft && (
+        <p className="rounded-lg bg-blue-900/30 px-4 py-2 text-blue-400 text-sm">对方连接中断，等待重连...</p>
+      )}
       {peer.error && (
         <p className="text-red-400 text-sm">{peer.error}</p>
       )}
@@ -477,6 +529,28 @@ export default function RoomClient() {
                   </div>
                 </div>
               )}
+              {(sherpaLoad.phase === "downloading" || sherpaLoad.phase === "initializing") && (
+                <div className="mt-1">
+                  <p className="text-cyan-300/80 text-[10px] italic">
+                    {sherpaLoad.phase === "initializing"
+                      ? "初始化识别引擎..."
+                      : `首次加载识别模型 ${sherpaLoad.percent > 0 ? sherpaLoad.percent + '%' : ''}`}
+                    {sherpaLoad.total > 0 && sherpaLoad.phase === "downloading" && (
+                      <span className="text-cyan-300/50 ml-1">
+                        ({(sherpaLoad.loaded / 1_048_576).toFixed(1)} / {(sherpaLoad.total / 1_048_576).toFixed(0)} MB)
+                      </span>
+                    )}
+                  </p>
+                  <div className="mt-1 h-1 rounded-full bg-cyan-900/30 overflow-hidden">
+                    <div
+                      className={`h-full transition-all duration-200 bg-cyan-400/70 ${
+                        sherpaLoad.phase === "initializing" ? "animate-pulse" : ""
+                      }`}
+                      style={{ width: `${sherpaLoad.phase === "initializing" ? 100 : sherpaLoad.percent}%` }}
+                    />
+                  </div>
+                </div>
+              )}
               {translating && !modelLoading && !myTranslatedText && (
                 <p className="text-white/30 text-[10px] italic">翻译中...</p>
               )}
@@ -486,7 +560,7 @@ export default function RoomClient() {
               {asrError && !modelLoading && (
                 <p className="text-red-400 text-[10px] italic mt-1">语音识别: {asrError}</p>
               )}
-              {!asrError && !mySourceText && (asrStatus === "starting" || asrStatus === "unavailable") && (
+              {!asrError && !mySourceText && sherpaLoad.phase === "ready" && (asrStatus === "starting" || asrStatus === "unavailable") && (
                 <p className="text-yellow-300/70 text-[10px] italic mt-1">
                   {asrStatus === "starting" ? "正在启动语音识别..." : "该浏览器不支持语音识别"}
                 </p>

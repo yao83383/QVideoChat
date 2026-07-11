@@ -13,6 +13,8 @@ import SettingsModal, { getSettings } from "@/components/SettingsModal";
 import { useFaceMesh } from "@/hooks/useFaceMesh";
 import { useSocket } from "@/hooks/useSocket";
 import { useUser } from "@/hooks/useUser";
+import { preloadSherpa } from "@/lib/ai/sherpa-engine";
+import { preloadPair } from "@/lib/ai/translate";
 import type { MatchEvents, SignalEvents } from "@/hooks/useSocket";
 
 export default function Home() {
@@ -80,6 +82,40 @@ export default function Home() {
   };
 
   useEffect(() => () => stop(), [stop]);
+
+  // Warm up the ASR + translation pipelines from the home page so they're
+  // ready by the time the user finishes matching. Two rules learned the hard
+  // way in v1.2.2.007:
+  //   1) SERIAL, not parallel. Kicking off sherpa's emscripten runtime AND
+  //      the transformers.js worker at the same time on a cold cache produced
+  //      a "null function" crash inside sherpa's wasm — presumably a race in
+  //      shared feature-detection state or cross-origin isolation checks.
+  //      Awaiting sherpa first sidesteps it.
+  //   2) sherpa's .data (190MB) is now cached in OPFS by resolveDataBlobUrl —
+  //      the second visit reads it locally in a couple seconds, no network.
+  const preloadedRef = useRef(false);
+  useEffect(() => {
+    if (preloadedRef.current) return;
+    preloadedRef.current = true;
+    const readPref = (key: string, fallback: string) => {
+      try { const raw = localStorage.getItem(key); return raw ? JSON.parse(raw) : fallback; }
+      catch { return fallback; }
+    };
+    (async () => {
+      try {
+        await preloadSherpa();
+      } catch (e) {
+        console.warn("[home] preloadSherpa failed:", e);
+        return; // don't kick opus-mt if sherpa itself is broken — avoid noise
+      }
+      const sl: string = readPref("qv_sl", "zh");
+      const tl: string = readPref("qv_tl", "en");
+      if (sl !== tl) {
+        try { await preloadPair(sl, tl); }
+        catch (e) { console.warn("[home] preloadPair failed:", e); }
+      }
+    })();
+  }, []);
 
   const handleMatch = async () => {
     if (!isConnected) return;
