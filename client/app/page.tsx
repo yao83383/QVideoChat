@@ -74,11 +74,10 @@ export default function Home() {
   );
 
   const { isConnected, joinMatch, cancelMatch, socketRef } = useSocket(matchEvents, signalEvents);
-  const { blendshapeRef, isLoaded, isCameraOn, error, step, faceFound, start, stop, toggleCamera } = useFaceMesh();
+  const { blendshapeRef, poseRef, isLoaded, isCameraOn, error, step, faceFound, start, stop, toggleCamera } = useFaceMesh();
 
   const handleToggleCamera = async () => {
     toggleCamera();
-    setShowDebug(isCameraOn ? false : !showDebug);
   };
 
   useEffect(() => () => stop(), [stop]);
@@ -133,10 +132,24 @@ export default function Home() {
       }
     }
     setBanMsg("");
+    // Unlock autoplay on this user gesture — otherwise the room page's remote
+    // audio.play() may be blocked by autoplay policy.
     const ac = new (window.AudioContext || (window as any).webkitAudioContext)();
     ac.resume();
-    joinMatch(uid, name, selectedTags);
-    setMatchStatus("matching");
+    // Persist tags for /room to pick up. Empty array means "match anyone".
+    try {
+      localStorage.setItem("qv_pendingTags", JSON.stringify(selectedTags));
+    } catch { /* ignore */ }
+    // Skip queuing on this page — go straight to the room shell so the user
+    // sees their own avatar preview immediately. /room will call joinMatch
+    // once its own socket is connected, and fills the partner slot on
+    // match:found without navigating.
+    const params = new URLSearchParams({
+      uid,
+      uname: name,
+      reg: user?.isRegistered ? "1" : "0",
+    });
+    router.push(`/room?${params.toString()}`);
   };
 
   if (userLoading) {
@@ -239,11 +252,19 @@ export default function Home() {
       {faceFound && <p className="text-green-400 text-xs">追踪就绪 · 人脸检测中</p>}
       {step && !isLoaded && <p className="text-yellow-400 text-xs">加载中: {step}</p>}
 
-      {showDebug && (
+      {isLoaded && (
         <div className="flex flex-col xl:flex-row items-center gap-6">
-          <BlendshapeDebug blendshapeRef={blendshapeRef} />
-          <VrmAvatar blendshapeRef={blendshapeRef} size={320} label="Q版形象 (本地)" />
+          <VrmAvatar blendshapeRef={blendshapeRef} poseRef={poseRef} size={320} label="预览 (本地)" mirror />
+          {showDebug && <BlendshapeDebug blendshapeRef={blendshapeRef} />}
         </div>
+      )}
+
+      {isLoaded && (
+        <MatchButton
+          label={showDebug ? "隐藏 debug" : "显示 blendshape debug"}
+          variant="secondary"
+          onClick={() => setShowDebug((v) => !v)}
+        />
       )}
 
       <FriendList

@@ -1,7 +1,8 @@
 "use client";
 
 import { useRef, useState, useCallback, useEffect } from "react";
-import type { BlendshapeFrame } from "./useFaceMesh";
+import type { BlendshapeFrame, PoseFrame } from "./useFaceMesh";
+import type { AvatarConfig } from "@/components/VrmAvatar";
 import { VoiceConnection } from "@/lib/voice/VoiceConnection";
 
 interface SignalingEvents {
@@ -24,6 +25,10 @@ export interface TranslationMessage {
 
 export interface UsePeerReturn {
   remoteBlendshapeRef: React.MutableRefObject<BlendshapeFrame | null>;
+  remotePoseRef: React.MutableRefObject<PoseFrame | null>;
+  /** Latest AvatarConfig broadcast by the peer — VrmAvatar reads this so the
+   *  peer controls how they appear to us, not the other way around. */
+  remoteAvatarConfigRef: React.MutableRefObject<AvatarConfig | null>;
   remoteTranslationRef: React.MutableRefObject<TranslationMessage | null>;
   remoteAudioStream: MediaStream | null;
   localAudioStream: MediaStream | null;
@@ -52,11 +57,15 @@ export interface UsePeerReturn {
 export function usePeer(
   blendshapeRef: React.MutableRefObject<BlendshapeFrame | null>,
   signaling: SignalingEvents,
+  poseRef?: React.MutableRefObject<PoseFrame | null>,
+  localAvatarConfigRef?: React.MutableRefObject<AvatarConfig | null>,
 ): UsePeerReturn {
   const voiceRef = useRef<VoiceConnection | null>(null);
   const dcRef = useRef<RTCDataChannel | null>(null);
   const translateDcRef = useRef<RTCDataChannel | null>(null);
   const remoteBlendshapeRef = useRef<BlendshapeFrame | null>(null);
+  const remotePoseRef = useRef<PoseFrame | null>(null);
+  const remoteAvatarConfigRef = useRef<AvatarConfig | null>(null);
   const remoteTranslationRef = useRef<TranslationMessage | null>(null);
   const translationSubsRef = useRef<Set<(msg: TranslationMessage) => void>>(new Set());
   const sendTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -88,18 +97,57 @@ export function usePeer(
         for (const [key, val] of Object.entries(data.values)) {
           if (val > 0.001) filtered[key] = Math.round(val * 1000) / 1000;
         }
-        dcRef.current.send(JSON.stringify({ t: data.timestamp, b: filtered }));
+        const payload: { t: number; b: Record<string, number>; h?: number[]; p?: number[]; c?: [number, number] } = {
+          t: data.timestamp,
+          b: filtered,
+        };
+        const r3 = (n: number) => Math.round(n * 1000) / 1000;
+        if (data.head) {
+          // Quantize head Euler to 3 decimals — ~0.06° resolution, plenty for
+          // face tracking, keeps the DC frame small. Trailing dist (meters,
+          // ~0.001 m resolution) is appended when available; older peers just
+          // see a 3-element array and ignore the length gap.
+          payload.h = [r3(data.head.pitch), r3(data.head.yaw), r3(data.head.roll)];
+          if (data.head.dist !== undefined) payload.h.push(r3(data.head.dist));
+        }
+        const pose = poseRef?.current;
+        if (pose) {
+          payload.p = [r3(pose.shoulderRoll), r3(pose.shoulderYaw)];
+        }
+        const cfg = localAvatarConfigRef?.current;
+        if (cfg) {
+          payload.c = [r3(cfg.zoom), r3(cfg.gain)];
+        }
+        dcRef.current.send(JSON.stringify(payload));
       }, 33);
     };
     dc.onmessage = (event) => {
       try {
         const data = JSON.parse(event.data);
         if (data.b) {
-          remoteBlendshapeRef.current = { timestamp: data.t, values: data.b };
+          const frame: BlendshapeFrame = { timestamp: data.t, values: data.b };
+          if (Array.isArray(data.h) && data.h.length >= 3) {
+            frame.head = { pitch: data.h[0], yaw: data.h[1], roll: data.h[2] };
+            if (data.h.length >= 4) frame.head.dist = data.h[3];
+          }
+          remoteBlendshapeRef.current = frame;
+          if (Array.isArray(data.p) && data.p.length >= 2) {
+            remotePoseRef.current = {
+              timestamp: data.t,
+              shoulderRoll: data.p[0],
+              shoulderYaw: data.p[1],
+            };
+          }
+          if (Array.isArray(data.c) && data.c.length >= 2) {
+            remoteAvatarConfigRef.current = {
+              zoom: data.c[0],
+              gain: data.c[1],
+            };
+          }
         }
       } catch { /* ignore */ }
     };
-  }, [blendshapeRef]);
+  }, [blendshapeRef, poseRef, localAvatarConfigRef]);
 
   const setupTranslationChannel = useCallback((dc: RTCDataChannel) => {
     translateDcRef.current = dc;
@@ -146,6 +194,8 @@ export function usePeer(
     translateDcRef.current?.close(); translateDcRef.current = null;
     voiceRef.current?.close(); voiceRef.current = null;
     remoteBlendshapeRef.current = null;
+    remotePoseRef.current = null;
+    remoteAvatarConfigRef.current = null;
     remoteTranslationRef.current = null;
     setRemoteAudioStream(null); setLocalAudioStream(null); setIsConnected(false); setIsConnecting(false); setIceState("idle");
     setRemoteMicOn(true);
@@ -276,7 +326,7 @@ export function usePeer(
   useEffect(() => () => cleanup(), [cleanup]);
 
   return {
-    remoteBlendshapeRef, remoteTranslationRef, remoteAudioStream, localAudioStream,
+    remoteBlendshapeRef, remotePoseRef, remoteAvatarConfigRef, remoteTranslationRef, remoteAudioStream, localAudioStream,
     isConnected, isConnecting, iceState, error,
     isMicOn, remoteMicOn, toggleMic, sendTranslation, onRemoteTranslation,
     initConnection, startAsInitiator,

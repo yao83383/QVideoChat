@@ -39,7 +39,20 @@ export class MatchQueue {
 
   join(user: Omit<QueuedUser, "joinedAt">): void {
     const existing = this.queue.find((u) => u.userId === user.userId);
-    if (existing) return;
+    if (existing) {
+      // Same user rejoined via a fresh socket (page reload, home→room nav,
+      // reconnect). Refresh the socketId so tryPair emits match:found to the
+      // LIVE socket instead of the dead one — otherwise the client stays
+      // stuck in "searching" forever. Keep joinedAt so wait-bonus scoring
+      // still reflects the original queue time.
+      existing.socketId = user.socketId;
+      existing.username = user.username;
+      existing.tags = user.tags;
+      existing.deviceId = user.deviceId;
+      existing.nativeLang = user.nativeLang;
+      existing.targetLang = user.targetLang;
+      return;
+    }
     this.queue.push({ ...user, joinedAt: Date.now() });
   }
 

@@ -1,8 +1,8 @@
 "use client";
 
-import { useState, useEffect, useRef, useMemo } from "react";
+import { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
-import VrmAvatar from "@/components/VrmAvatar";
+import VrmAvatar, { type AvatarConfig } from "@/components/VrmAvatar";
 import MatchButton from "@/components/MatchButton";
 import VoiceStatus from "@/components/VoiceStatus";
 import LoginPrompt from "@/components/LoginPrompt";
@@ -33,13 +33,21 @@ export default function RoomClient() {
   const router = useRouter();
   const sp = useSearchParams();
 
-  const roomId = sp.get("id") || "";
+  // Only the user's own identity is fixed for the life of the session; the
+  // room and partner change every time we match a new peer via the in-room
+  // "下一个" flow. Keep those as state, initialized from URL for the first
+  // match that brought us here.
   const userId = sp.get("uid") || "";
   const uname = sp.get("uname") || "我";
-  const puid = sp.get("puid") || "";
-  const pname = sp.get("pname") || "对方";
   const isRegistered = sp.get("reg") === "1";
+  const [roomId, setRoomId] = useState(sp.get("id") || "");
+  const [puid, setPuid] = useState(sp.get("puid") || "");
+  const [pname, setPname] = useState(sp.get("pname") || "对方");
   const isInitiator = userId < puid;
+
+  // `searching` covers both "arrived without a partner" and "user clicked
+  // 下一个 to re-queue" — the partner window shows a placeholder either way.
+  const [searching, setSearching] = useState(!sp.get("id"));
 
   const [partnerLeft, setPartnerLeft] = useState(false);
   const [partnerReconnecting, setPartnerReconnecting] = useState(false);
@@ -69,10 +77,18 @@ export default function RoomClient() {
     phase: "idle", loaded: 0, total: 0, percent: 0,
   });
 
-  const { blendshapeRef, isLoaded, isCameraOn, error: camError, step: camStep, faceFound, start, stop, toggleCamera } = useFaceMesh();
+  const { blendshapeRef, poseRef, isLoaded, isCameraOn, error: camError, step: camStep, faceFound, start, stop, toggleCamera } = useFaceMesh();
   useEffect(() => { start(); return () => stop(); }, []);
   const cameraEverLoaded = useRef(false);
   useEffect(() => { if (isLoaded) cameraEverLoaded.current = true; }, [isLoaded]);
+
+  // Local avatar config (zoom + dolly gain) that VrmAvatar reports whenever
+  // the user clicks the on-screen controls. Broadcast on every DC frame so
+  // the peer's render of us honors OUR framing, not theirs.
+  const myAvatarConfigRef = useRef<AvatarConfig | null>(null);
+  const handleMyConfigChange = useCallback((cfg: AvatarConfig) => {
+    myAvatarConfigRef.current = cfg;
+  }, []);
 
   const onOfferRef = useRef<(sdp: RTCSessionDescriptionInit) => void>(undefined);
   const onAnswerRef = useRef<(sdp: RTCSessionDescriptionInit) => void>(undefined);
@@ -85,8 +101,26 @@ export default function RoomClient() {
   }), []);
 
   const matchEvents: MatchEvents = useMemo(() => ({
-    onWaiting: () => {},
-    onFound: () => {},
+    onWaiting: () => {
+      // Server acknowledged our re-queue — stay in "searching" state until
+      // match:found arrives (or the user leaves).
+      setSearching(true);
+    },
+    onFound: (data) => {
+      // A new match arrived while we're sitting in the room. Swap in the new
+      // partner and let the peer-init effect rebuild the PC on the next tick.
+      setRoomId(data.roomId);
+      setPuid(data.partner.userId);
+      setPname(data.partner.username);
+      setSearching(false);
+      setPartnerLeft(false);
+      setPartnerReconnecting(false);
+      setRoomReady(false);
+      setFriendStatus("none");
+      setShowFriendPrompt(false);
+      setTopicText("");
+      setRejoinTick((t) => t + 1);
+    },
     onReady: () => setRoomReady(true),
     onPartnerLeft: () => {
       setPartnerLeft(true);
@@ -142,7 +176,7 @@ export default function RoomClient() {
     onIceCandidate: (candidate: RTCIceCandidateInit) => { socket.sendIce(roomId, candidate); },
   }), [socket.sendOffer, socket.sendAnswer, socket.sendIce, roomId]);
 
-  const peer = usePeer(blendshapeRef, signaling);
+  const peer = usePeer(blendshapeRef, signaling, poseRef, myAvatarConfigRef);
 
   useEffect(() => {
     onOfferRef.current = peer.handleIncomingOffer;
@@ -156,6 +190,7 @@ export default function RoomClient() {
   const initStartedRef = useRef<number>(-1);
   useEffect(() => {
     if (!socket.isConnected || !isLoaded) return;
+    if (!roomId) return;  // in-room search state: no partner yet, don't init.
     if (initStartedRef.current === rejoinTick) return;
     initStartedRef.current = rejoinTick;
     (async () => {
@@ -170,6 +205,31 @@ export default function RoomClient() {
     if (!roomReady || !isInitiator) return;
     peer.startAsInitiator();
   }, [roomReady, isInitiator, peer.startAsInitiator]);
+
+  // If we landed here without a partner (i.e. straight from the "开始匹配"
+  // button on the home page), auto-queue ourselves as soon as the socket is
+  // ready. Only fires ONCE per page load — re-matches via handleNext do their
+  // own joinMatch call.
+  const autoQueuedRef = useRef(false);
+  useEffect(() => {
+    // Direct-typed /room URL with no identity → bounce back to home so the
+    // user can enter a name and start matching properly.
+    if (!userId || !uname) {
+      router.replace("/");
+      return;
+    }
+    if (autoQueuedRef.current) return;
+    if (!socket.isConnected) return;
+    if (roomId) return;  // arrived with a partner, no need to queue.
+    autoQueuedRef.current = true;
+    let tags: string[] = [];
+    try {
+      tags = JSON.parse(localStorage.getItem("qv_pendingTags") || "[]");
+      if (!Array.isArray(tags)) tags = [];
+    } catch { /* ignore */ }
+    setSearching(true);
+    socket.joinMatch(userId, uname, tags);
+  }, [socket.isConnected, socket.joinMatch, roomId, userId, uname, router]);
 
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
@@ -433,15 +493,33 @@ export default function RoomClient() {
   const handleSubtitleToggle = () => setSubtitleEnabled((v) => !v);
 
   const handleHangup = () => {
-    socket.leaveRoom(roomId);
+    if (roomId) socket.leaveRoom(roomId);
     peer.disconnect();
     router.push("/");
   };
 
   const handleNext = () => {
-    socket.leaveRoom(roomId);
+    // Leave current room, wipe partner state, and queue up for a new match
+    // WITHOUT navigating away. The onFound handler in matchEvents will fill
+    // the partner slot back in once the server matches us.
+    if (roomId) socket.leaveRoom(roomId);
     peer.disconnect();
-    router.push("/");
+    setRoomId("");
+    setPuid("");
+    setPname("对方");
+    setPartnerLeft(false);
+    setPartnerReconnecting(false);
+    setRoomReady(false);
+    setFriendStatus("none");
+    setShowFriendPrompt(false);
+    setTopicText("");
+    setSearching(true);
+    let tags: string[] = [];
+    try {
+      tags = JSON.parse(localStorage.getItem("qv_pendingTags") || "[]");
+      if (!Array.isArray(tags)) tags = [];
+    } catch { /* ignore */ }
+    socket.joinMatch(userId, uname, tags);
   };
 
   const handleAddFriend = () => {
@@ -472,14 +550,29 @@ export default function RoomClient() {
       <audio ref={audioRef} autoPlay playsInline hidden />
       <h1 className="text-xl font-bold tracking-tight">QVideoChat</h1>
 
-      {partnerLeft && (
+      {partnerLeft && !searching && (
         <p className="rounded-lg bg-yellow-900/30 px-4 py-2 text-yellow-400 text-sm">对方已离开房间</p>
+      )}
+      {searching && (
+        <div className="flex items-center gap-3 rounded-lg bg-blue-900/30 px-4 py-2 text-blue-400 text-sm">
+          <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-blue-500 border-t-transparent" />
+          <span>正在为你寻找下一位聊天对象...</span>
+        </div>
       )}
       {partnerReconnecting && !partnerLeft && (
         <p className="rounded-lg bg-blue-900/30 px-4 py-2 text-blue-400 text-sm">对方连接中断，等待重连...</p>
       )}
       {peer.error && (
-        <p className="text-red-400 text-sm">{peer.error}</p>
+        peer.error.includes("Permission denied") || peer.error.includes("NotAllowedError") ? (
+          <div className="rounded-lg bg-red-900/40 border border-red-700 px-4 py-3 text-sm max-w-lg">
+            <p className="font-medium text-red-300 mb-1">🎤 麦克风权限被拒绝</p>
+            <p className="text-red-200/80 text-xs leading-relaxed">
+              浏览器阻止了麦克风访问,双方无法通话。请点击浏览器地址栏左侧的 🔒 锁形图标 → 麦克风 → 改为"允许",然后刷新页面。
+            </p>
+          </div>
+        ) : (
+          <p className="text-red-400 text-sm">{peer.error}</p>
+        )
       )}
 
       {topicText && <TopicCard text={topicText} category={topicCategory} />}
@@ -492,7 +585,13 @@ export default function RoomClient() {
         {/* My avatar */}
         <div className="flex flex-col items-center gap-2 w-full max-w-[280px] md:w-72">
           {isCameraOn ? (
-            <VrmAvatar blendshapeRef={blendshapeRef} size={260} />
+            <VrmAvatar
+              blendshapeRef={blendshapeRef}
+              poseRef={poseRef}
+              size={260}
+              mirror
+              onConfigChange={handleMyConfigChange}
+            />
           ) : (
             <div className="rounded-2xl bg-neutral-950 flex items-center justify-center" style={{ width: 260, height: 260 }}>
               <span className="text-neutral-600 text-5xl">📷</span>
@@ -593,8 +692,35 @@ export default function RoomClient() {
 
         {/* Partner avatar */}
         <div className="flex flex-col items-center gap-2 w-full max-w-[280px] md:w-72">
-          <VrmAvatar blendshapeRef={peer.remoteBlendshapeRef} size={260} muted={partnerLeft} />
-          <VoiceStatus stream={peer.remoteAudioStream} label={`${pname} (对方)`} muted={partnerLeft} />
+          {searching || !roomId ? (
+            /*
+             * Partner ad/waiting slot. Reserved for a future ad board so the
+             * empty half of the screen earns revenue while the user waits for
+             * a match. To wire in ads: replace this <div> with an <AdBoard/>
+             * component sized 260×260, keep the same wrapper so layout is
+             * stable. VoiceStatus below already switches to a "寻找中..." label.
+             */
+            <div
+              className="rounded-2xl bg-neutral-950 border border-neutral-800 flex flex-col items-center justify-center gap-3"
+              style={{ width: 260, height: 260 }}
+            >
+              <div className="h-8 w-8 animate-spin rounded-full border-2 border-neutral-700 border-t-neutral-300" />
+              <span className="text-neutral-500 text-xs">等待接入</span>
+            </div>
+          ) : (
+            <VrmAvatar
+              blendshapeRef={peer.remoteBlendshapeRef}
+              poseRef={peer.remotePoseRef}
+              externalConfigRef={peer.remoteAvatarConfigRef}
+              size={260}
+              muted={partnerLeft}
+            />
+          )}
+          {searching || !roomId ? (
+            <span className="text-xs text-neutral-500">寻找中...</span>
+          ) : (
+            <VoiceStatus stream={peer.remoteAudioStream} label={`${pname} (对方)`} muted={partnerLeft} />
+          )}
 
           {/* Partner speech subtitle */}
           {subtitleEnabled && (
@@ -706,11 +832,11 @@ export default function RoomClient() {
       <div className="flex gap-4 mt-2">
         <button onClick={handleHangup}
           className="rounded-lg bg-neutral-800 border border-neutral-700 px-4 py-2 text-sm text-neutral-300 hover:border-red-600 hover:text-red-400 transition">
-          挂断
+          回主页
         </button>
-        <button onClick={handleNext}
-          className="rounded-lg bg-white text-black px-4 py-2 text-sm font-medium hover:bg-neutral-200 transition">
-          下一个
+        <button onClick={handleNext} disabled={searching}
+          className="rounded-lg bg-white text-black px-4 py-2 text-sm font-medium hover:bg-neutral-200 transition disabled:opacity-40 disabled:cursor-not-allowed">
+          {searching ? "寻找中..." : "下一个"}
         </button>
         {!reported && (
           <button onClick={() => { reportUser(puid, roomId, ""); setReported(true); }}
