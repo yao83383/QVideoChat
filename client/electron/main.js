@@ -10,8 +10,10 @@
  * Windows:
  *   - main window: full app UX at app://qvideochat/
  *   - pet window: single-avatar desktop pet at app://qvideochat/pet/?target=…
- *     transparent + frameless + always-on-top, opened via IPC or a global
- *     Ctrl+Shift+P shortcut (dev toggle until slice E adds the tray icon).
+ *     transparent + frameless + always-on-top
+ *   - system tray icon (slice E): purple Q, click to reveal main window,
+ *     right-click menu for pet toggle + explicit quit. Closing any window
+ *     `.hide()`s it — the tray is the only path to real termination.
  */
 
 const {
@@ -23,6 +25,9 @@ const {
   ipcMain,
   globalShortcut,
   screen,
+  Tray,
+  Menu,
+  nativeImage,
 } = require("electron");
 const path = require("node:path");
 const { pathToFileURL } = require("node:url");
@@ -59,13 +64,12 @@ app.commandLine.appendSwitch(
 // will copy both under resources/app/ so the same relative path holds.
 const OUT_DIR = path.join(__dirname, "..", "out");
 
-// Tracked so IPC handlers can hand back the same window on repeated
-// pet:open calls, and so `app.on('before-quit')` can distinguish
-// intentional shutdowns from user-hiding a window.
 /** @type {BrowserWindow | null} */
 let mainWindow = null;
 /** @type {BrowserWindow | null} */
 let petWindow = null;
+/** @type {Tray | null} */
+let tray = null;
 let isQuittingApp = false;
 
 function registerAppProtocol() {
@@ -137,6 +141,26 @@ function autoGrantMediaPermissions() {
   }
 }
 
+/**
+ * DevTools toggle via a per-window shortcut. Global shortcuts would swallow
+ * Ctrl+Shift+I everywhere on the OS which is rude; before-input-event only
+ * fires when this window has focus.
+ */
+function bindDevtoolsShortcut(win) {
+  win.webContents.on("before-input-event", (event, input) => {
+    if (input.type !== "keyDown") return;
+    const isDev = input.control && input.shift && input.key.toLowerCase() === "i";
+    const isReload = input.control && !input.shift && input.key.toLowerCase() === "r";
+    if (isDev) {
+      win.webContents.toggleDevTools();
+      event.preventDefault();
+    } else if (isReload) {
+      win.reload();
+      event.preventDefault();
+    }
+  });
+}
+
 /** Create the main app window (full UX — matches the web app 1:1). */
 function createMainWindow() {
   const win = new BrowserWindow({
@@ -162,23 +186,19 @@ function createMainWindow() {
 
   win.once("ready-to-show", () => win.show());
   win.loadURL("app://qvideochat/");
+  bindDevtoolsShortcut(win);
 
   // Close-button behavior:
-  //   pet visible → hide the main window instead of destroying it. Destroying
-  //     the renderer tears down MediaPipe + camera stream, and the pet has no
-  //     way to reacquire them without a full-app relaunch.
-  //   pet not visible → really close (mainWindow becomes null, and if pet is
-  //     also gone `window-all-closed` will quit the app on non-macOS).
+  //   Always hide → the tray keeps the app resident and MediaPipe alive so
+  //   the pet keeps rendering. Real quit only from tray "退出" (which flips
+  //   isQuittingApp and lets this handler pass through).
+  //   setSkipTaskbar(true) removes the taskbar entry so the "hidden" state
+  //   reads as "sent to tray" instead of "still there, just invisible".
   win.on("close", (e) => {
     if (isQuittingApp) return;
-    if (
-      petWindow &&
-      !petWindow.isDestroyed() &&
-      petWindow.isVisible()
-    ) {
-      e.preventDefault();
-      win.hide();
-    }
+    e.preventDefault();
+    win.hide();
+    win.setSkipTaskbar(true);
   });
 
   win.on("closed", () => {
@@ -189,14 +209,25 @@ function createMainWindow() {
   return win;
 }
 
+function revealMainWindow() {
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    createMainWindow();
+    return;
+  }
+  // Reverse whatever hide() did: put it back on the taskbar and raise it.
+  mainWindow.setSkipTaskbar(false);
+  if (!mainWindow.isVisible()) mainWindow.show();
+  if (mainWindow.isMinimized()) mainWindow.restore();
+  mainWindow.focus();
+}
+
 /**
  * Create (or reveal) the pet window. Idempotent: repeated calls just
  * `show()` + `focus()` the existing window instead of stacking a second
  * transparent overlay.
  *
  * Positioning: bottom-right of the primary display's work area (respects
- * taskbar height on Windows / dock on macOS). No user-relocatable memory
- * yet — that lands with the tray in slice E.
+ * taskbar height on Windows / dock on macOS).
  *
  * @param {"self" | "partner"} target
  */
@@ -227,20 +258,15 @@ function openPetWindow(target = "self") {
     skipTaskbar: true,
     focusable: true,
     // `screen-saver` puts the pet above full-screen apps too. Some users
-    // find this too aggressive — slice E's settings will expose a toggle.
+    // find this too aggressive — future settings toggle can drop it back.
     alwaysOnTop: true,
     show: false,
-    // Prevent white flash on load; the pet page will make body transparent
-    // once React mounts, but until then this keeps the frameless rect from
-    // painting white/black over the desktop wallpaper.
     backgroundColor: "#00000000",
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: false,
-      // Same rationale as the main window: keep the VRM animation loop
-      // running when the pet is behind other apps or on another workspace.
       backgroundThrottling: false,
     },
   });
@@ -248,6 +274,7 @@ function openPetWindow(target = "self") {
   win.setAlwaysOnTop(true, "screen-saver");
   win.once("ready-to-show", () => win.show());
   win.loadURL(`app://qvideochat/pet/?target=${encodeURIComponent(target)}`);
+  bindDevtoolsShortcut(win);
 
   // Close button in the pet HUD calls `window.close()` — intercept and hide
   // instead so the user can toggle the pet back on without a full reload of
@@ -265,6 +292,74 @@ function openPetWindow(target = "self") {
 
   petWindow = win;
   return win;
+}
+
+/**
+ * Build a purple-circle tray icon in-process — avoids shipping a separate
+ * PNG asset until we design a real logo. 32x32 BGRA bitmap; Windows
+ * automatically down-samples for the 16x16 tray slot.
+ */
+function buildTrayIcon() {
+  const SIZE = 32;
+  const buf = Buffer.alloc(SIZE * SIZE * 4);
+  for (let y = 0; y < SIZE; y++) {
+    for (let x = 0; x < SIZE; x++) {
+      const dx = x - 15.5;
+      const dy = y - 15.5;
+      const r2 = dx * dx + dy * dy;
+      const idx = (y * SIZE + x) * 4;
+      if (r2 < 210) {
+        // Filled purple (matches the brand gradient's warm end).
+        buf[idx] = 247;      // B
+        buf[idx + 1] = 85;   // G
+        buf[idx + 2] = 168;  // R
+        buf[idx + 3] = 255;  // A
+      }
+      // else: leaves alpha 0 — transparent corners so the icon reads as a circle.
+    }
+  }
+  return nativeImage.createFromBitmap(buf, { width: SIZE, height: SIZE });
+}
+
+function createTray() {
+  tray = new Tray(buildTrayIcon());
+  tray.setToolTip("QVideoChat");
+
+  const menu = Menu.buildFromTemplate([
+    {
+      label: "显示主窗口",
+      click: () => revealMainWindow(),
+    },
+    {
+      label: "显示 / 隐藏桌宠",
+      click: () => {
+        if (
+          petWindow &&
+          !petWindow.isDestroyed() &&
+          petWindow.isVisible()
+        ) {
+          petWindow.hide();
+        } else {
+          openPetWindow("self");
+        }
+      },
+    },
+    { type: "separator" },
+    {
+      label: "退出 QVideoChat",
+      click: () => {
+        isQuittingApp = true;
+        app.quit();
+      },
+    },
+  ]);
+  tray.setContextMenu(menu);
+
+  // Left-click on Windows / macOS = reveal the main app. macOS also fires
+  // 'double-click' for the same intent; wire both to keep the handler
+  // definition in one place.
+  tray.on("click", revealMainWindow);
+  tray.on("double-click", revealMainWindow);
 }
 
 /** IPC contract exposed via preload.js → window.qvHost.* */
@@ -289,12 +384,7 @@ function registerIpc() {
   });
 
   ipcMain.handle("qv:main:show", () => {
-    if (mainWindow && !mainWindow.isDestroyed()) {
-      mainWindow.show();
-      mainWindow.focus();
-    } else {
-      createMainWindow();
-    }
+    revealMainWindow();
     return true;
   });
 
@@ -325,9 +415,8 @@ function registerIpc() {
 }
 
 /**
- * Global dev-toggle: Ctrl+Shift+P anywhere on the OS opens or hides the pet
- * window. Slice E adds a tray icon + main-window button as the "real" UX;
- * this shortcut stays as a power-user affordance.
+ * Global Ctrl+Shift+P toggles the pet from anywhere on the OS — a
+ * power-user shortcut that predates the tray. Kept because muscle memory.
  */
 function registerGlobalShortcuts() {
   const ok = globalShortcut.register("CommandOrControl+Shift+P", () => {
@@ -346,10 +435,12 @@ app.whenReady().then(() => {
   autoGrantMediaPermissions();
   registerIpc();
   registerGlobalShortcuts();
+  createTray();
   createMainWindow();
 
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) createMainWindow();
+    else revealMainWindow();
   });
 });
 
@@ -359,8 +450,14 @@ app.on("before-quit", () => {
 
 app.on("will-quit", () => {
   globalShortcut.unregisterAll();
+  if (tray) {
+    tray.destroy();
+    tray = null;
+  }
 });
 
+// Do NOT app.quit() here — the tray keeps the app resident. Users pick
+// "退出 QVideoChat" from the tray menu when they really mean it.
 app.on("window-all-closed", () => {
-  if (process.platform !== "darwin") app.quit();
+  // no-op
 });
