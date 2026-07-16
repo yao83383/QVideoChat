@@ -5,6 +5,7 @@
   "scripts": {
     "dev": "next dev --port 3000",
     "build": "next build",
+    "build:electron": "node scripts/build-electron.mjs",
     "start": "next start --port 3000",
     "lint": "next lint"
   },

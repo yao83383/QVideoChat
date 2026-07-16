@@ -1,7 +1,16 @@
 import type { NextConfig } from "next";
 
-const basePath = process.env.NEXT_PUBLIC_BASE_PATH || "/q-dev";
-const isExport = process.env.NEXT_EXPORT === "1";
+// Build target selection:
+//   NEXT_ELECTRON=1 → package for Electron desktop shell (implies static
+//     export + empty basePath + trailingSlash — Electron loads file://
+//     and there's no URL prefix to prepend)
+//   NEXT_EXPORT=1  → generic static export (used historically for offline
+//     handoffs); Electron mode is a superset
+//   otherwise     → regular Next.js SSR/hybrid; basePath comes from
+//     NEXT_PUBLIC_BASE_PATH (default "/q-dev" for the q-dev deploy)
+const isElectron = process.env.NEXT_ELECTRON === "1";
+const isExport = isElectron || process.env.NEXT_EXPORT === "1";
+const basePath = isElectron ? "" : (process.env.NEXT_PUBLIC_BASE_PATH || "/q-dev");
 
 const nextConfig: NextConfig = {
   basePath,
@@ -22,6 +31,11 @@ const nextConfig: NextConfig = {
   // us without breaking third-party fetches (HF CDN for translation models,
   // etc.); COEP "require-corp" would require every remote fetch to carry a
   // CORP header, which we can't control.
+  //
+  // In Electron the headers() branch is skipped (static export can't emit
+  // per-route headers). Instead the main process injects the same COOP/COEP
+  // pair via session.defaultSession.webRequest.onHeadersReceived — see
+  // electron/main.ts.
   async headers() {
     if (isExport) return [];
     const coopCoep = [
