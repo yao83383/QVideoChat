@@ -46,8 +46,17 @@ function registerAppProtocol() {
   protocol.handle("app", async (request) => {
     const url = new URL(request.url);
     let pathname = decodeURIComponent(url.pathname);
-    if (pathname === "" || pathname === "/") pathname = "/index.html";
-    else if (pathname.endsWith("/")) pathname += "index.html";
+    if (pathname === "" || pathname === "/") {
+      pathname = "/index.html";
+    } else if (pathname.endsWith("/")) {
+      pathname += "index.html";
+    } else if (!/\.[a-zA-Z0-9]+$/.test(pathname)) {
+      // No file extension, no trailing slash → treat as a next.js route.
+      // With trailingSlash:true the exporter wrote `/<name>/index.html`;
+      // client-side navigation sometimes strips that trailing slash
+      // (next 15 quirk), so we re-attach it before hitting disk.
+      pathname += "/index.html";
+    }
     const filePath = path.join(OUT_DIR, pathname);
     try {
       return await net.fetch(pathToFileURL(filePath).toString());
