@@ -53,6 +53,11 @@ interface Props {
    *  frame reads as "an avatar loading" instead of a black square + spinner. */
   placeholderEmoji?: string;
   placeholderTint?: string;
+  /** Kill the rounded dark frame and all opaque loading overlays so the
+   *  avatar floats on whatever's behind (desktop wallpaper in the pet
+   *  window's case). Loading placeholder emoji still renders, just without
+   *  its gradient card. */
+  transparent?: boolean;
   className?: string;
 }
 
@@ -69,6 +74,7 @@ export default function VrmAvatar({
   onConfigChange,
   placeholderEmoji,
   placeholderTint,
+  transparent = false,
   className = "",
 }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -330,7 +336,7 @@ export default function VrmAvatar({
   return (
     <div className={`flex flex-col items-center gap-2 ${className}`}>
       <div
-        className={`relative overflow-hidden rounded-2xl bg-neutral-950 ${glowClass}`}
+        className={`relative overflow-hidden ${transparent ? "" : `rounded-2xl bg-neutral-950 ${glowClass}`}`}
         style={size > 0 ? { width: size, height: size } : { width: "100%", height: "100%" }}
       >
         <canvas ref={canvasRef} className="h-full w-full" />
@@ -346,7 +352,7 @@ export default function VrmAvatar({
                  in the room). */}
         {modelStatus === "loading" && placeholderEmoji && (
           <>
-            <div className={`pointer-events-none absolute inset-0 flex items-center justify-center bg-gradient-to-br ${placeholderTint || "from-purple-500/25 to-pink-500/25"}`}>
+            <div className={`pointer-events-none absolute inset-0 flex items-center justify-center ${transparent ? "" : `bg-gradient-to-br ${placeholderTint || "from-purple-500/25 to-pink-500/25"}`}`}>
               <span className="text-8xl opacity-70 select-none drop-shadow-lg" aria-hidden>{placeholderEmoji}</span>
             </div>
             <div className="pointer-events-none absolute inset-x-0 bottom-2 flex flex-col items-center gap-1.5 px-4">
@@ -369,7 +375,7 @@ export default function VrmAvatar({
           </>
         )}
         {modelStatus === "loading" && !placeholderEmoji && (
-          <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-2.5 bg-neutral-950/60 backdrop-blur-sm px-4">
+          <div className={`pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-2.5 px-4 ${transparent ? "" : "bg-neutral-950/60 backdrop-blur-sm"}`}>
             <div className="h-8 w-8 animate-spin rounded-full border-2 border-neutral-700 border-t-white" />
             {loadProgress.total > 0 ? (
               <>

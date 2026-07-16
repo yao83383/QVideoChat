@@ -159,6 +159,7 @@ function PetView() {
             placeholderEmoji={selectedEntry.emoji}
             placeholderTint={selectedEntry.tint}
             mirror
+            transparent
           />
         ) : (
           <PartnerPlaceholder />
