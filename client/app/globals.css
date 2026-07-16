@@ -23,3 +23,25 @@ body {
   from { opacity: 0; transform: translate(-50%, 24px); }
   to   { opacity: 1; transform: translate(-50%, 0); }
 }
+
+/* Pet-window helpers. `-webkit-app-region` is an Electron property (no-op
+ * in a regular browser) that turns a chunk of the frameless BrowserWindow
+ * into an OS-level drag handle. We keep them opt-in classes so the main
+ * app UI isn't accidentally draggable — the whole desktop-pet UX is one
+ * strip drags, everything else clickable. */
+.qv-drag-region {
+  -webkit-app-region: drag;
+  app-region: drag;
+}
+.qv-no-drag {
+  -webkit-app-region: no-drag;
+  app-region: no-drag;
+}
+
+/* When the pet page mounts it adds `.pet-body` so the whole shell — html,
+ * body, and any full-height wrapper — goes transparent. Without this, the
+ * frameless BrowserWindow shows a black rectangle instead of the desktop. */
+body.pet-body,
+html:has(body.pet-body) {
+  background: transparent !important;
+}
