@@ -140,15 +140,36 @@ function createMainWindow() {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: false,
+      // Chromium throttles requestAnimationFrame + video pipelines on hidden
+      // windows by default, which would freeze useFaceMesh the moment the
+      // user minimizes or hides the main window — killing the blendshape
+      // stream the pet subscribes to. Disable throttling so the shell can
+      // fade to background while still driving the pet.
+      backgroundThrottling: false,
     },
   });
 
   win.once("ready-to-show", () => win.show());
   win.loadURL("app://qvideochat/");
 
-  // On close: really close the main window. If the pet is still up it stays
-  // as a lightweight "presence" until the user quits from its tray/menu
-  // (slice E) — desktop pet apps commonly outlive the launching UI.
+  // Close-button behavior:
+  //   pet visible → hide the main window instead of destroying it. Destroying
+  //     the renderer tears down MediaPipe + camera stream, and the pet has no
+  //     way to reacquire them without a full-app relaunch.
+  //   pet not visible → really close (mainWindow becomes null, and if pet is
+  //     also gone `window-all-closed` will quit the app on non-macOS).
+  win.on("close", (e) => {
+    if (isQuittingApp) return;
+    if (
+      petWindow &&
+      !petWindow.isDestroyed() &&
+      petWindow.isVisible()
+    ) {
+      e.preventDefault();
+      win.hide();
+    }
+  });
+
   win.on("closed", () => {
     mainWindow = null;
   });
@@ -207,6 +228,9 @@ function openPetWindow(target = "self") {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: false,
+      // Same rationale as the main window: keep the VRM animation loop
+      // running when the pet is behind other apps or on another workspace.
+      backgroundThrottling: false,
     },
   });
 
