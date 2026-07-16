@@ -27,6 +27,20 @@ export interface QvHostApi {
   onBlendshape: (cb: (frame: BlendshapeFrame) => void) => () => void;
   pushPose: (frame: PoseFrame) => void;
   onPose: (cb: (frame: PoseFrame) => void) => () => void;
+
+  /** Minimize the main window to the taskbar. */
+  minimizeMain: () => Promise<boolean>;
+  /** Toggle maximize/restore. Returns whether it's maximized after. */
+  toggleMaximizeMain: () => Promise<boolean>;
+  /** Close the main window — goes through the shell's close handler, which
+   *  routes to hide-to-tray in the running slice-E setup. */
+  closeMain: () => Promise<boolean>;
+  isMainMaximized: () => Promise<boolean>;
+  onMainMaximizedChange: (cb: (maximized: boolean) => void) => () => void;
+  /** Underlying OS ('darwin' | 'win32' | 'linux'). Used by the custom
+   *  title bar to hide its own buttons on macOS (native traffic lights). */
+  platform: NodeJS.Platform;
+
   isDesktop: true;
 }
 

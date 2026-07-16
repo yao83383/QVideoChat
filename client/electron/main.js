@@ -170,6 +170,16 @@ function createMainWindow() {
     minHeight: 600,
     show: false,
     backgroundColor: "#0a0a0a",
+    // Kill the native chrome so we can paint our own title bar (matches the
+    // brand's dark-purple aesthetic instead of the default Windows white).
+    // macOS keeps its native traffic lights via titleBarStyle:hiddenInset
+    // — that reads better than a fake button row over there.
+    ...(process.platform === "darwin"
+      ? {
+          titleBarStyle: "hiddenInset",
+          trafficLightPosition: { x: 14, y: 14 },
+        }
+      : { frame: false }),
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
       contextIsolation: true,
@@ -187,6 +197,14 @@ function createMainWindow() {
   win.once("ready-to-show", () => win.show());
   win.loadURL("app://qvideochat/");
   bindDevtoolsShortcut(win);
+
+  // Push maximize state to the renderer so the title bar's max/restore
+  // button can flip glyphs without polling. Fires on Windows Aero-snap +
+  // manual max/unmax and after `setBounds` too.
+  const pushMaxState = () =>
+    win.webContents.send("qv:window:maximized", win.isMaximized());
+  win.on("maximize", pushMaxState);
+  win.on("unmaximize", pushMaxState);
 
   // Close-button behavior:
   //   Always hide → the tray keeps the app resident and MediaPipe alive so
@@ -390,6 +408,33 @@ function registerIpc() {
   ipcMain.handle("qv:main:show", () => {
     revealMainWindow();
     return true;
+  });
+
+  // Custom title-bar controls. We killed the native frame so the renderer
+  // needs the shell to actually resize/minimize/close on its behalf.
+  ipcMain.handle("qv:window:minimize", () => {
+    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.minimize();
+    return true;
+  });
+
+  ipcMain.handle("qv:window:toggle-maximize", () => {
+    if (!mainWindow || mainWindow.isDestroyed()) return false;
+    if (mainWindow.isMaximized()) mainWindow.unmaximize();
+    else mainWindow.maximize();
+    return mainWindow.isMaximized();
+  });
+
+  ipcMain.handle("qv:window:close", () => {
+    // Route through .close() so the existing 'close' handler (which hides
+    // to tray if not truly quitting) stays the single source of truth.
+    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.close();
+    return true;
+  });
+
+  ipcMain.handle("qv:window:is-maximized", () => {
+    return Boolean(
+      mainWindow && !mainWindow.isDestroyed() && mainWindow.isMaximized(),
+    );
   });
 
   // Blendshape / pose forward channel. Renderer → main → pet. `.send` is

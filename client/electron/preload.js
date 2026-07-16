@@ -71,6 +71,30 @@ contextBridge.exposeInMainWorld("qvHost", {
     return () => ipcRenderer.removeListener("qv:pose", handler);
   },
 
+  // --- Main window custom title-bar controls ---------------------------
+  //
+  // We killed the native window chrome (frame: false on win/linux) so the
+  // renderer needs the shell to actually resize / minimize / close for it.
+  // All handlers live in electron/main.js. Close intentionally routes
+  // through mainWindow.close() so the existing tray-hide logic still runs.
+
+  minimizeMain: () => ipcRenderer.invoke("qv:window:minimize"),
+  toggleMaximizeMain: () => ipcRenderer.invoke("qv:window:toggle-maximize"),
+  closeMain: () => ipcRenderer.invoke("qv:window:close"),
+  isMainMaximized: () => ipcRenderer.invoke("qv:window:is-maximized"),
+  /**
+   * Subscribe to maximize-state changes pushed by the main process. Fires
+   * on manual max/unmax + Aero snap. Returns unsubscribe.
+   */
+  onMainMaximizedChange: (cb) => {
+    const handler = (_e, val) => cb(Boolean(val));
+    ipcRenderer.on("qv:window:maximized", handler);
+    return () => ipcRenderer.removeListener("qv:window:maximized", handler);
+  },
+  /** Which OS we're on — the title bar hides Windows/Linux buttons on
+   *  macOS because macOS's native traffic lights already render there. */
+  platform: process.platform,
+
   /** True when running inside the Electron shell (window.qvHost exists). */
   isDesktop: true,
 });

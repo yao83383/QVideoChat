@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import "./globals.css";
+import DesktopTitleBar from "@/components/DesktopTitleBar";
 
 export const metadata: Metadata = {
   title: "QVideoChat",
@@ -13,7 +14,13 @@ export default function RootLayout({
 }) {
   return (
     <html lang="zh-CN">
-      <body className="min-h-screen">{children}</body>
+      <body className="min-h-screen">
+        {/* Only paints inside Electron shell + outside /pet route. In a
+            plain browser tab this renders nothing and body's padding-top
+            stays whatever CSS said. */}
+        <DesktopTitleBar />
+        {children}
+      </body>
     </html>
   );
 }
