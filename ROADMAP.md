@@ -208,7 +208,9 @@ v1.2.x 攒下了完整的技术底座 — VRM 化身、面部驱动、WebRTC、�
 ## 版本演进
 
 - v1.3 = A + B + C + D + E + F 全部完成 → 升 MINOR 到 v1.3.0
-- v1.4+ = monetization L1(装扮真买断)+ 消息系统 + 多化身
+- **v1.4 = 打包 + 桌宠版(Electron PC 端 + 桌宠模式)**,详见 [`.opencode/plans/handoff-v1.4.md`](.opencode/plans/handoff-v1.4.md);Android 顺延到 v1.6
+- v1.5 = monetization L1(装扮真买断)
+- v1.6+ = Android app + 悬浮窗桌宠、消息系统、多化身
 
 ---
 
