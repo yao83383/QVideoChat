@@ -15,6 +15,9 @@ export interface QvHostApi {
   togglePet: (target?: PetTarget) => Promise<boolean>;
   showMain: () => Promise<boolean>;
   onPetTargetChange: (cb: (target: PetTarget) => void) => () => void;
+  /** Main → pet: re-play the boot animation. Fires when openPet is called
+   *  against an already-existing pet window (Ctrl+Shift+P toggle back on). */
+  onPetReveal: (cb: () => void) => () => void;
   /**
    * Main-window-only: push a MediaPipe blendshape frame to the pet window.
    * Fire-and-forget IPC; safe to call at 30fps. Main process drops silently

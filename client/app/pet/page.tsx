@@ -53,6 +53,25 @@ function PetView() {
   // quiet bottom status line; VrmAvatar itself doesn't need this flag.
   const [connected, setConnected] = useState(false);
 
+  // Boot animation gate. `bootTick` increments every time we want to REPLAY
+  // — bumping it swaps the key on the overlay + char wrapper, which restarts
+  // the CSS animations. React can't diff-then-restart the same animation on
+  // the same element otherwise. `booting` gates the overlay's presence and
+  // the char's `qv-boot-char` class; a timer clears it after the animation
+  // is safely done (1.3s covers the 1.2s total + a paint frame's slack).
+  const [bootTick, setBootTick] = useState(0);
+  const [booting, setBooting] = useState(true);
+  useEffect(() => {
+    if (!booting) return;
+    const t = setTimeout(() => setBooting(false), 1300);
+    return () => clearTimeout(t);
+  }, [booting, bootTick]);
+
+  const triggerBoot = () => {
+    setBootTick((n) => n + 1);
+    setBooting(true);
+  };
+
   // Force body / html transparent so the OS-level compositing behind the
   // BrowserWindow (desktop wallpaper) shows through the transparent regions.
   // Reverting on unmount keeps browser-tab debug sessions well-behaved.
@@ -108,6 +127,16 @@ function PetView() {
     });
   }, [router]);
 
+  // Main process replays the CRT-boot animation each time the pet becomes
+  // visible after being hidden (Ctrl+Shift+P toggle back on, tray click,
+  // etc.). The initial mount already boots on its own via the useState
+  // default, so this handler catches only the second-onward reveals.
+  useEffect(() => {
+    if (typeof window === "undefined" || !window.qvHost) return;
+    return window.qvHost.onPetReveal(() => triggerBoot());
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // Close routes through the Electron shell so we hide (cheap to bring
   // back — VRM already loaded) instead of destroying the window. Falls back
   // to a plain window.close() in a normal browser tab so dev sessions still
@@ -148,22 +177,40 @@ function PetView() {
 
       {/* Avatar canvas centered in whatever window size the shell picks.
           Placing the avatar in a flex-1 wrapper lets the pet window resize
-          without reshaping the character — the mount just re-centers it. */}
-      <div className="qv-no-drag flex-1 flex items-center justify-center overflow-hidden">
-        {target === "self" ? (
-          <VrmAvatar
-            blendshapeRef={blendshapeRef}
-            poseRef={poseRef}
-            size={260}
-            vrmPath={selectedEntry.vrmPath}
-            placeholderEmoji={selectedEntry.emoji}
-            placeholderTint={selectedEntry.tint}
-            mirror
-            transparent
-          />
-        ) : (
-          <PartnerPlaceholder />
+          without reshaping the character — the mount just re-centers it.
+          `bootTick` is baked into the key so re-triggering boot restarts
+          the CSS animation instead of no-oping on the same DOM node. */}
+      <div className="qv-no-drag flex-1 relative flex items-center justify-center overflow-hidden">
+        {booting && (
+          <div
+            key={`boot-${bootTick}`}
+            className="pointer-events-none absolute inset-0 z-40 overflow-hidden"
+            aria-hidden
+          >
+            <div className="qv-boot-glow" />
+            <div className="qv-boot-scan" />
+            <div className="qv-boot-flash" />
+          </div>
         )}
+        <div
+          key={`char-${bootTick}`}
+          className={booting ? "qv-boot-char" : ""}
+        >
+          {target === "self" ? (
+            <VrmAvatar
+              blendshapeRef={blendshapeRef}
+              poseRef={poseRef}
+              size={260}
+              vrmPath={selectedEntry.vrmPath}
+              placeholderEmoji={selectedEntry.emoji}
+              placeholderTint={selectedEntry.tint}
+              mirror
+              transparent
+            />
+          ) : (
+            <PartnerPlaceholder />
+          )}
+        </div>
       </div>
 
       {/* Bottom-edge status text. Kept ultra-quiet so the pet reads as

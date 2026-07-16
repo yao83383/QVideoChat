@@ -30,6 +30,16 @@ contextBridge.exposeInMainWorld("qvHost", {
     ipcRenderer.on("qv:pet:target", handler);
     return () => ipcRenderer.removeListener("qv:pet:target", handler);
   },
+  /**
+   * Main → pet: re-play the boot/reveal animation. Fires on every openPet
+   * against an already-visible pet window; the very first mount fires its
+   * own boot without needing this signal.
+   */
+  onPetReveal: (cb) => {
+    const handler = () => cb();
+    ipcRenderer.on("qv:pet:reveal", handler);
+    return () => ipcRenderer.removeListener("qv:pet:reveal", handler);
+  },
 
   // --- Blendshape bridge ------------------------------------------------
   //

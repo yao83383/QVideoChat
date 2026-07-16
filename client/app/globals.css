@@ -45,3 +45,109 @@ body.pet-body,
 html:has(body.pet-body) {
   background: transparent !important;
 }
+
+/* ---- Pet reveal animation (CRT tube + hologram scanline) ------------
+ * Fired every time the pet window becomes visible. Total duration 1.2s.
+ *
+ * Layered elements (all with `pointer-events: none`, in a positioned
+ * overlay above VrmAvatar):
+ *   qv-boot-flash : white horizontal line → widens → full white flash →
+ *                    fades through purple to transparent (0-600ms)
+ *   qv-boot-glow  : purple radial glow expanding from center, drops off
+ *                    over the full 1.2s
+ *   qv-boot-scan  : magenta gradient band sweeping top → bottom, 200-1200ms
+ *
+ * The character itself gets `qv-boot-char`: opacity 0→1 with a bottom-up
+ * clip-path unmask + blur → sharpen + hue-rotate settle. Reads as a
+ * teleport materialize.
+ *
+ * All timings are `will-change`-hinted so the compositor can lift them off
+ * the main thread — the pet window is a live 3D render, we can't afford
+ * layout thrash during the reveal. */
+
+@keyframes qv-boot-flash {
+  0%   { clip-path: polygon(50% 49.5%, 50% 50.5%, 50% 50.5%, 50% 49.5%);
+         opacity: 0; background: #ffffff; }
+  8%   { clip-path: polygon(0 49.5%, 0 50.5%, 100% 50.5%, 100% 49.5%);
+         opacity: 1; background: #ffffff; }
+  25%  { clip-path: polygon(0 0, 0 100%, 100% 100%, 100% 0);
+         opacity: 1; background: #ffffff; }
+  55%  { clip-path: polygon(0 0, 0 100%, 100% 100%, 100% 0);
+         opacity: 0.55; background: rgba(168, 85, 247, 0.6); }
+  100% { clip-path: polygon(0 0, 0 100%, 100% 100%, 100% 0);
+         opacity: 0; background: transparent; }
+}
+
+@keyframes qv-boot-glow {
+  0%   { opacity: 0.9; transform: scale(0.15); }
+  35%  { opacity: 1;   transform: scale(1.2); }
+  100% { opacity: 0;   transform: scale(2.2); }
+}
+
+@keyframes qv-boot-scan {
+  0%   { transform: translateY(-120%); opacity: 0; }
+  15%  { opacity: 1; }
+  85%  { opacity: 0.8; }
+  100% { transform: translateY(120%); opacity: 0; }
+}
+
+@keyframes qv-boot-char {
+  0%   { opacity: 0; transform: scale(0.65);
+         filter: blur(14px) brightness(2.4) hue-rotate(90deg) saturate(2);
+         clip-path: inset(100% 0 0 0); }
+  25%  { opacity: 0.35; transform: scale(0.85);
+         filter: blur(8px) brightness(1.9) hue-rotate(45deg) saturate(1.6);
+         clip-path: inset(40% 0 0 0); }
+  60%  { opacity: 1; transform: scale(1.04);
+         filter: blur(2px) brightness(1.35) hue-rotate(10deg) saturate(1.2);
+         clip-path: inset(0 0 0 0); }
+  85%  { opacity: 1; transform: scale(1.01);
+         filter: blur(0.5px) brightness(1.1) hue-rotate(0deg) saturate(1.05);
+         clip-path: inset(0 0 0 0); }
+  100% { opacity: 1; transform: scale(1);
+         filter: none;
+         clip-path: inset(0 0 0 0); }
+}
+
+.qv-boot-flash {
+  position: absolute; inset: 0;
+  animation: qv-boot-flash 0.65s cubic-bezier(0.25, 0.8, 0.4, 1) forwards;
+  will-change: clip-path, opacity, background;
+  mix-blend-mode: screen;
+}
+
+.qv-boot-glow {
+  position: absolute; inset: -20%;
+  background: radial-gradient(
+    circle at 50% 50%,
+    rgba(244, 114, 182, 0.55) 0%,
+    rgba(168, 85, 247, 0.35) 30%,
+    transparent 65%
+  );
+  animation: qv-boot-glow 1.2s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  will-change: opacity, transform;
+  transform-origin: 50% 50%;
+  mix-blend-mode: screen;
+}
+
+.qv-boot-scan {
+  position: absolute; left: 0; right: 0;
+  height: 45%;
+  background: linear-gradient(
+    to bottom,
+    transparent 0%,
+    rgba(168, 85, 247, 0.15) 30%,
+    rgba(244, 114, 182, 0.8) 50%,
+    rgba(168, 85, 247, 0.15) 70%,
+    transparent 100%
+  );
+  box-shadow: 0 0 32px 4px rgba(244, 114, 182, 0.45);
+  animation: qv-boot-scan 1s 0.2s cubic-bezier(0.4, 0, 0.6, 1) forwards;
+  will-change: transform, opacity;
+  mix-blend-mode: screen;
+}
+
+.qv-boot-char {
+  animation: qv-boot-char 1s 0.15s cubic-bezier(0.16, 1, 0.3, 1) both;
+  will-change: opacity, transform, filter, clip-path;
+}

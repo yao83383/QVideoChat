@@ -236,6 +236,10 @@ function openPetWindow(target = "self") {
     petWindow.show();
     petWindow.focus();
     petWindow.webContents.send("qv:pet:target", target);
+    // Re-play the boot animation on every reveal — first mount handles
+    // itself, but Ctrl+Shift+P toggle-back-on needs a nudge because the
+    // renderer never unmounts between hides.
+    petWindow.webContents.send("qv:pet:reveal");
     return petWindow;
   }
 
