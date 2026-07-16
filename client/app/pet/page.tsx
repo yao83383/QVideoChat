@@ -36,6 +36,58 @@ import type { BlendshapeFrame, PoseFrame } from "@/hooks/useFaceMesh";
 
 type Target = "self" | "partner";
 
+// Four hand-authored reveal animations (see globals.css `qv-boot-<name>-*`).
+// Each spec pairs the overlay children with the character-wrapper class so
+// the two halves of the effect stay in sync. Adding a fifth = add an entry
+// and a matching CSS block; nothing else to wire.
+const BOOT_VARIANTS = ["crt", "assemble", "portal", "holo"] as const;
+type BootVariant = (typeof BOOT_VARIANTS)[number];
+
+const CHAR_CLASS_BY_VARIANT: Record<BootVariant, string> = {
+  crt: "qv-boot-crt-char",
+  assemble: "qv-boot-assemble-char",
+  portal: "qv-boot-portal-char",
+  holo: "qv-boot-holo-char",
+};
+
+function pickBootVariant(): BootVariant {
+  return BOOT_VARIANTS[Math.floor(Math.random() * BOOT_VARIANTS.length)];
+}
+
+function BootOverlayLayers({ variant }: { variant: BootVariant }) {
+  switch (variant) {
+    case "crt":
+      return (
+        <>
+          <div className="qv-boot-crt-glow" />
+          <div className="qv-boot-crt-scan" />
+          <div className="qv-boot-crt-flash" />
+        </>
+      );
+    case "assemble":
+      return (
+        <>
+          <div className="qv-boot-assemble-cloud" />
+          <div className="qv-boot-assemble-spark" />
+        </>
+      );
+    case "portal":
+      return (
+        <>
+          <div className="qv-boot-portal-ring" />
+          <div className="qv-boot-portal-ring-b" />
+        </>
+      );
+    case "holo":
+      return (
+        <>
+          <div className="qv-boot-holo-lines" />
+          <div className="qv-boot-holo-scan" />
+        </>
+      );
+  }
+}
+
 function PetView() {
   const sp = useSearchParams();
   const router = useRouter();
@@ -57,17 +109,26 @@ function PetView() {
   // — bumping it swaps the key on the overlay + char wrapper, which restarts
   // the CSS animations. React can't diff-then-restart the same animation on
   // the same element otherwise. `booting` gates the overlay's presence and
-  // the char's `qv-boot-char` class; a timer clears it after the animation
-  // is safely done (1.3s covers the 1.2s total + a paint frame's slack).
+  // the char's variant class; a timer clears it after the longest variant
+  // (assemble @ 1.3s) has safely painted its last frame.
+  //
+  // `bootVariant` starts fixed at "crt" so the SSR-rendered HTML matches
+  // what the client hydrates to (Math.random() at module scope would cause
+  // a hydration warning). The first useEffect below immediately pick a real
+  // random variant, so users only ever perceive random reveals — the
+  // deterministic "crt" is only the SSR/hydration seed and gets overwritten
+  // on the same paint frame as the initial boot fires.
+  const [bootVariant, setBootVariant] = useState<BootVariant>("crt");
   const [bootTick, setBootTick] = useState(0);
-  const [booting, setBooting] = useState(true);
+  const [booting, setBooting] = useState(false);
   useEffect(() => {
     if (!booting) return;
-    const t = setTimeout(() => setBooting(false), 1300);
+    const t = setTimeout(() => setBooting(false), 1500);
     return () => clearTimeout(t);
   }, [booting, bootTick]);
 
   const triggerBoot = () => {
+    setBootVariant(pickBootVariant());
     setBootTick((n) => n + 1);
     setBooting(true);
   };
@@ -127,11 +188,13 @@ function PetView() {
     });
   }, [router]);
 
-  // Main process replays the CRT-boot animation each time the pet becomes
+  // Main process replays the boot animation each time the pet becomes
   // visible after being hidden (Ctrl+Shift+P toggle back on, tray click,
-  // etc.). The initial mount already boots on its own via the useState
-  // default, so this handler catches only the second-onward reveals.
+  // etc.). Also fires ONCE on initial mount below via the same triggerBoot
+  // path so the SSR-safe initial state ("crt", booting: false) doesn't
+  // leak past hydration — the user never sees the deterministic default.
   useEffect(() => {
+    triggerBoot();
     if (typeof window === "undefined" || !window.qvHost) return;
     return window.qvHost.onPetReveal(() => triggerBoot());
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -187,14 +250,12 @@ function PetView() {
             className="pointer-events-none absolute inset-0 z-40 overflow-hidden"
             aria-hidden
           >
-            <div className="qv-boot-glow" />
-            <div className="qv-boot-scan" />
-            <div className="qv-boot-flash" />
+            <BootOverlayLayers variant={bootVariant} />
           </div>
         )}
         <div
           key={`char-${bootTick}`}
-          className={booting ? "qv-boot-char" : ""}
+          className={booting ? CHAR_CLASS_BY_VARIANT[bootVariant] : ""}
         >
           {target === "self" ? (
             <VrmAvatar
