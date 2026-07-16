@@ -43,6 +43,17 @@ protocol.registerSchemesAsPrivileged([
   },
 ]);
 
+// Windows-only occlusion detection: Chromium normally decides a covered or
+// off-screen window is "occluded" and throttles its render + timers even
+// with backgroundThrottling: false in place. That would make the main
+// window stop pushing MediaPipe frames the moment the user hides it, so
+// the pet freezes. Disabling this feature keeps rAF + setInterval running
+// at full rate regardless of window visibility.
+app.commandLine.appendSwitch(
+  "disable-features",
+  "CalculateNativeWinOcclusion",
+);
+
 // Resolve to client/out/. In dev this file lives at client/electron/main.js
 // and the export sits in client/out/. In a packaged build electron-builder
 // will copy both under resources/app/ so the same relative path holds.
