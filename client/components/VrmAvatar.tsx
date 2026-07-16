@@ -20,6 +20,7 @@ import {
   applyBlendshapes,
   applyHeadRotation,
   applyUpperBody,
+  applyIdleUpperBody,
   createFallbackModel,
   applyBlendshapesToFallback,
   computeFramings,
@@ -35,6 +36,10 @@ interface Props {
   isSpeaking?: boolean;
   /** Mirror head rotation horizontally — set true for self-view. */
   mirror?: boolean;
+  /** VRM asset path relative to /models (e.g. "unisex/DLco.vrm"). Changing
+   *  this prop tears down and rebuilds the WebGL context, so pass a stable
+   *  value — only flip it when the user commits to a new avatar. */
+  vrmPath?: string;
   /** Optional external config source. When provided, VrmAvatar reads zoom/gain
    *  from this ref every frame and hides the on-screen controls. This is how
    *  the partner view respects settings the peer chose for their own avatar. */
@@ -43,6 +48,11 @@ interface Props {
    *  RoomClient forwards these values through the DataChannel so the peer's
    *  view of us matches what we picked. */
   onConfigChange?: (config: AvatarConfig) => void;
+  /** Optional lightweight placeholder shown while the ~25MB VRM downloads.
+   *  Fills the loading overlay with a big emoji + tint gradient so the first
+   *  frame reads as "an avatar loading" instead of a black square + spinner. */
+  placeholderEmoji?: string;
+  placeholderTint?: string;
   className?: string;
 }
 
@@ -54,8 +64,11 @@ export default function VrmAvatar({
   muted = false,
   isSpeaking = false,
   mirror = false,
+  vrmPath = "unisex/DLco.vrm",
   externalConfigRef,
   onConfigChange,
+  placeholderEmoji,
+  placeholderTint,
   className = "",
 }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -65,6 +78,20 @@ export default function VrmAvatar({
   const sceneRef = useRef<THREE.Scene | null>(null);
   const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
   const frameRef = useRef<number>(0);
+  // Which of loading / ready / failed the current VRM asset is in. Feeds the
+  // overlay under the canvas so users don't stare at a black square during
+  // the ~5-20s download of a 15-33MB VRM file.
+  const [modelStatus, setModelStatus] = useState<"loading" | "ready" | "failed">("loading");
+  // Byte-level download progress from the underlying fetch. Rendered as an
+  // MB/percent readout + progress bar in the loading overlay so the hero
+  // avatar reads as "downloading" rather than "frozen" on first visit.
+  // total===0 means Content-Length was missing → fall back to a spinner-only
+  // indeterminate state.
+  const [loadProgress, setLoadProgress] = useState<{
+    loaded: number;
+    total: number;
+    percent: number;
+  }>({ loaded: 0, total: 0, percent: 0 });
   // Baseline face distance seen in the first valid frame — used as the
   // "neutral" position so the dolly reads user movement relative to it.
   const baseFaceDistRef = useRef<number | null>(null);
@@ -152,6 +179,12 @@ export default function VrmAvatar({
     const canvas = canvasRef.current;
     if (!canvas) return;
 
+    // Reset overlay to "loading" as soon as vrmPath changes — otherwise a
+    // previously-loaded avatar's "ready" state would linger and users would
+    // see a black canvas with no spinner while the new one downloads.
+    setModelStatus("loading");
+    setLoadProgress({ loaded: 0, total: 0, percent: 0 });
+
     const renderer = createRenderer(canvas, size);
     const scene = createScene();
     const camera = createCamera(size);
@@ -160,7 +193,13 @@ export default function VrmAvatar({
     sceneRef.current = scene;
     cameraRef.current = camera;
 
-    loadVRM(`${process.env.NEXT_PUBLIC_BASE_PATH || ""}/models/DLco.vrm`)
+    loadVRM(
+      `${process.env.NEXT_PUBLIC_BASE_PATH || ""}/models/${vrmPath}`,
+      (received, total) => {
+        const percent = total > 0 ? Math.min(100, Math.round((received / total) * 100)) : 0;
+        setLoadProgress({ loaded: received, total, percent });
+      },
+    )
       .then((vrm) => {
         // Some VRMs are authored facing -Z (away from the camera at +Z);
         // spin the whole rig 180° so we see the face by default.
@@ -168,6 +207,7 @@ export default function VrmAvatar({
         scene.add(vrm.scene);
         vrmRef.current = vrm;
         framingsRef.current = computeFramings(vrm.scene, vrm);
+        setModelStatus("ready");
       })
       .catch((err) => {
         console.warn("[VrmAvatar] VRM load failed, using fallback:", err);
@@ -175,6 +215,7 @@ export default function VrmAvatar({
         scene.add(fallback);
         fallbackRef.current = fallback;
         framingsRef.current = computeFramings(fallback);
+        setModelStatus("failed");
       });
 
     const animate = () => {
@@ -184,10 +225,18 @@ export default function VrmAvatar({
       const cam = cameraRef.current;
       const framings = framingsRef.current;
 
-      if (vrmRef.current && bs) {
-        applyBlendshapes(vrmRef.current, bs.values, mirrorRef.current);
-        if (bs.head) applyHeadRotation(vrmRef.current, bs.head, mirrorRef.current);
+      if (vrmRef.current) {
+        if (bs) {
+          applyBlendshapes(vrmRef.current, bs.values, mirrorRef.current);
+          if (bs.head) applyHeadRotation(vrmRef.current, bs.head, mirrorRef.current);
+        }
         if (pose) applyUpperBody(vrmRef.current, pose, mirrorRef.current);
+        // Idle runs whether or not the tracker has emitted a frame yet, so
+        // the model is never seen in bare T-pose. It writes LAST because it
+        // currently pure-assigns chest.rotation (see COMPOSE NOTE in
+        // blendshapeMap). Safe today because pose tracking is disabled;
+        // needs a rework if applyUpperBody is ever re-enabled.
+        applyIdleUpperBody(vrmRef.current, performance.now());
         vrmRef.current.update(0.016);
       } else if (fallbackRef.current && bs) {
         applyBlendshapesToFallback(fallbackRef.current, bs.values);
@@ -246,10 +295,35 @@ export default function VrmAvatar({
 
     return () => {
       cancelAnimationFrame(frameRef.current);
+      // Reset baseline so the next VRM starts with a fresh face-distance
+      // calibration — otherwise switching avatars can leave the camera
+      // at an odd dolly position relative to the new head Y.
+      baseFaceDistRef.current = null;
+      smoothedRatioRef.current = 1;
+      // Dispose the currently-loaded VRM so we don't leak GPU buffers when
+      // the user switches avatars. `renderer.dispose()` handles the WebGL
+      // side; the geometry/material graph attached to `scene` needs its own
+      // walk to release GPU memory attached to individual meshes.
+      const vrm = vrmRef.current;
+      if (vrm) {
+        scene.remove(vrm.scene);
+        vrm.scene.traverse((obj: any) => {
+          if (obj.geometry) obj.geometry.dispose?.();
+          if (obj.material) {
+            (Array.isArray(obj.material) ? obj.material : [obj.material]).forEach((m: any) => m.dispose?.());
+          }
+        });
+        vrmRef.current = null;
+      }
+      const fb = fallbackRef.current;
+      if (fb) {
+        scene.remove(fb);
+        fallbackRef.current = null;
+      }
       renderer.dispose();
       rendererRef.current = null;
     };
-  }, [size]);
+  }, [size, vrmPath]);
 
   const glowClass = isSpeaking ? "ring-2 ring-green-400/60" : "";
 
@@ -260,6 +334,68 @@ export default function VrmAvatar({
         style={size > 0 ? { width: size, height: size } : { width: "100%", height: "100%" }}
       >
         <canvas ref={canvasRef} className="h-full w-full" />
+        {/* Loading overlay: canvas alone is transparent, so a slow VRM download
+            leaves users staring at bg-neutral-950. Two shapes:
+              1. Emoji placeholder (when placeholderEmoji is passed): big
+                 emoji + tint gradient occupies the frame, small progress bar
+                 tucks along the bottom. The hero on the home page uses this
+                 so the first paint reads as "your character is loading" not
+                 "black square".
+              2. Plain spinner (fallback): the previous behaviour, used when
+                 the caller doesn't know which entry is loading (partner view
+                 in the room). */}
+        {modelStatus === "loading" && placeholderEmoji && (
+          <>
+            <div className={`pointer-events-none absolute inset-0 flex items-center justify-center bg-gradient-to-br ${placeholderTint || "from-purple-500/25 to-pink-500/25"}`}>
+              <span className="text-8xl opacity-70 select-none drop-shadow-lg" aria-hidden>{placeholderEmoji}</span>
+            </div>
+            <div className="pointer-events-none absolute inset-x-0 bottom-2 flex flex-col items-center gap-1.5 px-4">
+              {loadProgress.total > 0 ? (
+                <>
+                  <div className="w-28 h-1 rounded-full bg-black/50 overflow-hidden shadow">
+                    <div
+                      className="h-full bg-gradient-to-r from-purple-300 to-pink-300 transition-all duration-100"
+                      style={{ width: `${loadProgress.percent}%` }}
+                    />
+                  </div>
+                  <p className="text-[10px] text-white/90 font-medium tracking-wide drop-shadow">
+                    {loadProgress.percent}% · {(loadProgress.loaded / 1_048_576).toFixed(1)} / {(loadProgress.total / 1_048_576).toFixed(0)} MB
+                  </p>
+                </>
+              ) : (
+                <div className="h-5 w-5 animate-spin rounded-full border-2 border-white/40 border-t-white" />
+              )}
+            </div>
+          </>
+        )}
+        {modelStatus === "loading" && !placeholderEmoji && (
+          <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-2.5 bg-neutral-950/60 backdrop-blur-sm px-4">
+            <div className="h-8 w-8 animate-spin rounded-full border-2 border-neutral-700 border-t-white" />
+            {loadProgress.total > 0 ? (
+              <>
+                <p className="text-[10px] text-neutral-200 font-medium">
+                  加载化身中 {loadProgress.percent}%
+                </p>
+                <p className="text-[9px] text-neutral-500 -mt-1">
+                  {(loadProgress.loaded / 1_048_576).toFixed(1)} / {(loadProgress.total / 1_048_576).toFixed(0)} MB
+                </p>
+                <div className="w-28 h-1 rounded-full bg-neutral-800/80 overflow-hidden">
+                  <div
+                    className="h-full bg-gradient-to-r from-purple-400 to-pink-400 transition-all duration-100"
+                    style={{ width: `${loadProgress.percent}%` }}
+                  />
+                </div>
+              </>
+            ) : (
+              <p className="text-[10px] text-neutral-400">加载化身中…</p>
+            )}
+          </div>
+        )}
+        {modelStatus === "failed" && (
+          <div className="pointer-events-none absolute inset-x-2 bottom-2 rounded-md bg-red-900/60 border border-red-700/60 px-2 py-1 text-center">
+            <p className="text-[10px] text-red-300">化身加载失败,已切换为占位模型</p>
+          </div>
+        )}
         {muted && (
           <div className="absolute right-2 top-2 rounded-full bg-red-600 px-2 py-0.5 text-[10px] font-bold text-white">
             MUTED
@@ -298,6 +434,22 @@ export default function VrmAvatar({
               disabled={dollyGain >= 6 - 0.01}
               className="h-6 w-6 rounded bg-white/10 text-white text-sm font-bold hover:bg-white/20 disabled:opacity-30"
             >+</button>
+            <div className="w-px h-4 bg-white/20 mx-0.5" />
+            {/* Recalibrate the "neutral" face distance to whatever the camera
+                sees right now. Handy when the first frame captured the user
+                mid-lean, which anchors the dolly's baseline off and makes the
+                avatar look permanently zoomed-in/out until they refresh. */}
+            <button
+              type="button"
+              onClick={() => {
+                baseFaceDistRef.current = null;
+                smoothedRatioRef.current = 1;
+              }}
+              title="以当前脸距离为新基线"
+              className="rounded bg-white/10 hover:bg-white/20 px-2 h-6 text-white text-[10px] font-medium"
+            >
+              重校准
+            </button>
           </div>
         )}
         {/* Zoom controls. Reset stays PINNED at the top (disabled when at

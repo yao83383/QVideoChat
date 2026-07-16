@@ -29,6 +29,10 @@ export interface UsePeerReturn {
   /** Latest AvatarConfig broadcast by the peer — VrmAvatar reads this so the
    *  peer controls how they appear to us, not the other way around. */
   remoteAvatarConfigRef: React.MutableRefObject<AvatarConfig | null>;
+  /** The peer's currently-chosen VRM asset path (relative to /models).
+   *  `null` until we've received a first payload with `v`. Consumers should
+   *  fall back to their preferred default in that case. */
+  remoteVrmPath: string | null;
   remoteTranslationRef: React.MutableRefObject<TranslationMessage | null>;
   remoteAudioStream: MediaStream | null;
   localAudioStream: MediaStream | null;
@@ -44,6 +48,11 @@ export interface UsePeerReturn {
   sendTranslation: (msg: TranslationMessage) => void;
   /** Subscribe to remote subtitle messages. Returns an unsubscribe fn. */
   onRemoteTranslation: (cb: (msg: TranslationMessage) => void) => () => void;
+  /** Send an emote reaction (short key like "laugh", "thumbs"). Piggybacks
+   *  on the reliable translation channel so a tap is never dropped. */
+  sendEmote: (key: string) => void;
+  /** Subscribe to remote emote reactions. Returns an unsubscribe fn. */
+  onRemoteEmote: (cb: (key: string) => void) => () => void;
   /** Initializes the voice + PC + data channel handlers. Await this before any signalling. */
   initConnection: (asInitiator: boolean) => Promise<void>;
   /** Called by the initiator once the room is ready to send the offer. */
@@ -59,6 +68,7 @@ export function usePeer(
   signaling: SignalingEvents,
   poseRef?: React.MutableRefObject<PoseFrame | null>,
   localAvatarConfigRef?: React.MutableRefObject<AvatarConfig | null>,
+  localVrmPathRef?: React.MutableRefObject<string | null>,
 ): UsePeerReturn {
   const voiceRef = useRef<VoiceConnection | null>(null);
   const dcRef = useRef<RTCDataChannel | null>(null);
@@ -68,6 +78,7 @@ export function usePeer(
   const remoteAvatarConfigRef = useRef<AvatarConfig | null>(null);
   const remoteTranslationRef = useRef<TranslationMessage | null>(null);
   const translationSubsRef = useRef<Set<(msg: TranslationMessage) => void>>(new Set());
+  const emoteSubsRef = useRef<Set<(key: string) => void>>(new Set());
   const sendTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const signalingRef = useRef(signaling);
   signalingRef.current = signaling;
@@ -80,6 +91,10 @@ export function usePeer(
   const [error, setError] = useState<string | null>(null);
   const [isMicOn, setIsMicOn] = useState(true);
   const [remoteMicOn, setRemoteMicOn] = useState(true);
+  // Peer's currently-chosen avatar path (relative to /models). Updated only
+  // when the received value differs to avoid re-render churn 30x/second — the
+  // path only actually changes when the peer commits a new one in /avatars.
+  const [remoteVrmPath, setRemoteVrmPath] = useState<string | null>(null);
   const isMicOnRef = useRef(isMicOn);
   useEffect(() => { isMicOnRef.current = isMicOn; }, [isMicOn]);
 
@@ -97,7 +112,7 @@ export function usePeer(
         for (const [key, val] of Object.entries(data.values)) {
           if (val > 0.001) filtered[key] = Math.round(val * 1000) / 1000;
         }
-        const payload: { t: number; b: Record<string, number>; h?: number[]; p?: number[]; c?: [number, number] } = {
+        const payload: { t: number; b: Record<string, number>; h?: number[]; p?: number[]; c?: [number, number]; v?: string } = {
           t: data.timestamp,
           b: filtered,
         };
@@ -117,6 +132,14 @@ export function usePeer(
         const cfg = localAvatarConfigRef?.current;
         if (cfg) {
           payload.c = [r3(cfg.zoom), r3(cfg.gain)];
+        }
+        // Broadcast which VRM asset the peer should render for us. Sent every
+        // frame (~30/s) instead of only on change so a late-joining peer or a
+        // dropped frame doesn't leave them stuck showing DLco. Older clients
+        // that don't know about `v` just ignore the extra field.
+        const vp = localVrmPathRef?.current;
+        if (vp) {
+          payload.v = vp;
         }
         dcRef.current.send(JSON.stringify(payload));
       }, 33);
@@ -144,10 +167,15 @@ export function usePeer(
               gain: data.c[1],
             };
           }
+          if (typeof data.v === "string" && data.v.length > 0) {
+            // Only setState when the value actually differs — receiving the
+            // same path 30x/s would trigger 30 re-renders/s otherwise.
+            setRemoteVrmPath((prev) => (prev === data.v ? prev : data.v));
+          }
         }
       } catch { /* ignore */ }
     };
-  }, [blendshapeRef, poseRef, localAvatarConfigRef]);
+  }, [blendshapeRef, poseRef, localAvatarConfigRef, localVrmPathRef]);
 
   const setupTranslationChannel = useCallback((dc: RTCDataChannel) => {
     translateDcRef.current = dc;
@@ -162,6 +190,12 @@ export function usePeer(
         const data = JSON.parse(event.data);
         if (data.type === "mic") {
           setRemoteMicOn(data.on === 1);
+          return;
+        }
+        if (data.type === "emote" && typeof data.e === "string") {
+          for (const cb of emoteSubsRef.current) {
+            try { cb(data.e); } catch { /* subscriber error — swallow */ }
+          }
           return;
         }
         if (data.text || data.st) {
@@ -188,6 +222,19 @@ export function usePeer(
     return () => { translationSubsRef.current.delete(cb); };
   }, []);
 
+  const sendEmote = useCallback((key: string) => {
+    if (translateDcRef.current?.readyState === "open") {
+      try {
+        translateDcRef.current.send(JSON.stringify({ type: "emote", e: key }));
+      } catch { /* channel died between check and send */ }
+    }
+  }, []);
+
+  const onRemoteEmote = useCallback((cb: (key: string) => void) => {
+    emoteSubsRef.current.add(cb);
+    return () => { emoteSubsRef.current.delete(cb); };
+  }, []);
+
   const cleanup = useCallback(() => {
     if (sendTimerRef.current) { clearInterval(sendTimerRef.current); sendTimerRef.current = null; }
     dcRef.current?.close(); dcRef.current = null;
@@ -199,6 +246,7 @@ export function usePeer(
     remoteTranslationRef.current = null;
     setRemoteAudioStream(null); setLocalAudioStream(null); setIsConnected(false); setIsConnecting(false); setIceState("idle");
     setRemoteMicOn(true);
+    setRemoteVrmPath(null);
   }, []);
 
   const sendTranslation = useCallback((msg: TranslationMessage) => {
@@ -327,8 +375,10 @@ export function usePeer(
 
   return {
     remoteBlendshapeRef, remotePoseRef, remoteAvatarConfigRef, remoteTranslationRef, remoteAudioStream, localAudioStream,
+    remoteVrmPath,
     isConnected, isConnecting, iceState, error,
     isMicOn, remoteMicOn, toggleMic, sendTranslation, onRemoteTranslation,
+    sendEmote, onRemoteEmote,
     initConnection, startAsInitiator,
     handleIncomingOffer, handleIncomingAnswer, handleIncomingIce,
     disconnect: cleanup,

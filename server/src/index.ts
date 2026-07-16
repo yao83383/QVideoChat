@@ -11,6 +11,12 @@ import { router as usersRouter } from "./routes/users.js";
 import { router as friendsRouter } from "./routes/friends.js";
 import { router as historyRouter } from "./routes/history.js";
 import { router as reportsRouter } from "./routes/reports.js";
+import {
+  router as inviteRouter,
+  setInvitationNotifier,
+  setRoomChecker,
+} from "./routes/invite.js";
+import { migrateLegacyUsersToConfirmed } from "./invite.js";
 
 // Load .env.production if present. Node 20.6+ has process.loadEnvFile()
 // natively; we fall back to a small manual parser for older runtimes so we
@@ -50,6 +56,7 @@ app.use("/api/users", usersRouter);
 app.use("/api/friends", friendsRouter);
 app.use("/api/history", historyRouter);
 app.use("/api/reports", reportsRouter);
+app.use("/api/invite", inviteRouter);
 
 const httpServer = createServer(app);
 const io = new Server(httpServer, {
@@ -102,15 +109,40 @@ function broadcastToFriends(event: string, userId: string, data: Record<string, 
   }
 }
 
+// --- Invitation notifier wiring ---
+//
+// invite router calls these hooks whenever it creates or resolves a pending
+// invitation. We translate userId → live socketId(s) here so the router
+// stays decoupled from socket.io. Same wiring later gets the Web Push
+// dispatcher (J10) hung off it.
+setInvitationNotifier((targetUserId, event, payload) => {
+  for (const [sid, uid] of socketUsers) {
+    if (uid === targetUserId) {
+      io.to(sid).emit(event, payload);
+    }
+  }
+});
+
+setRoomChecker((roomId, userA, userB) => {
+  const room = roomManager.get(roomId);
+  if (!room) return false;
+  const ids = room.users.map((u) => u.userId);
+  return ids.includes(userA) && ids.includes(userB);
+});
+
+// One-shot migration on boot: any legacy registered users get promoted to
+// confirmed + OFFICIAL displayId. Idempotent — skips already-migrated ones.
+migrateLegacyUsersToConfirmed();
+
 // periodic cleanup of stale unclaimed rooms
 setInterval(() => roomManager.cleanupStale(15000), 10000);
 
 io.on("connection", (socket) => {
   console.log(`[connect] ${socket.id}`);
 
-  socket.on("match:join", (data: { username: string; userId: string; tags?: string[] }) => {
+  socket.on("match:join", (data: { username: string; userId: string; tags?: string[]; nativeLang?: string; targetLang?: string }) => {
     const { username, userId } = data;
-    console.log(`[match:join] ${username} (${userId})`);
+    console.log(`[match:join] ${username} (${userId}) sl=${data.nativeLang || "-"} tl=${data.targetLang || "-"}`);
 
     // Ensure user exists in DB (for FK constraints)
     getDb().prepare("INSERT OR IGNORE INTO users (userId, username, createdAt) VALUES (?, ?, ?)").run(
@@ -133,6 +165,8 @@ io.on("connection", (socket) => {
       userId, username, socketId: socket.id,
       tags: data.tags ?? [],
       deviceId: user?.deviceId || "",
+      nativeLang: data.nativeLang || undefined,
+      targetLang: data.targetLang || undefined,
     });
     socket.emit("match:waiting");
 

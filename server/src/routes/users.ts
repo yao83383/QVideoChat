@@ -1,5 +1,5 @@
 import { Router, Request, Response } from "express";
-import { getUserByToken, getAllTags, getUserTags, setUserTags, getUserStats, getReferralStats } from "../db.js";
+import { getUserByToken, getAllTags, getUserTags, setUserTags, getUserStats, getReferralStats, getUserPrefs, updateUserPrefs } from "../db.js";
 
 export const router = Router();
 
@@ -52,4 +52,27 @@ router.get("/referral", (req: Request, res: Response) => {
   if (!userId) { res.status(401).json({ error: "未认证" }); return; }
   const stats = getReferralStats(userId);
   res.json(stats);
+});
+
+// --- Cross-device preferences ---
+//
+// The four fields we sync so a user who signs in on a new device picks up
+// where they left off. Client seeds these on registration from localStorage
+// (guest → registered inheritance) and re-fetches on login.
+
+router.get("/me/prefs", (req: Request, res: Response) => {
+  const userId = auth(req);
+  if (!userId) { res.status(401).json({ error: "未认证" }); return; }
+  const prefs = getUserPrefs(userId);
+  if (!prefs) { res.status(404).json({ error: "用户不存在" }); return; }
+  res.json(prefs);
+});
+
+router.patch("/me/prefs", (req: Request, res: Response) => {
+  const userId = auth(req);
+  if (!userId) { res.status(401).json({ error: "未认证" }); return; }
+  const { gender, avatarId, nativeLanguage, targetLanguage } = req.body ?? {};
+  updateUserPrefs(userId, { gender, avatarId, nativeLanguage, targetLanguage });
+  const prefs = getUserPrefs(userId);
+  res.json(prefs);
 });

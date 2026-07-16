@@ -109,9 +109,97 @@ function initTables(db: Database.Database) {
   try { db.exec("ALTER TABLE users ADD COLUMN referredBy TEXT NOT NULL DEFAULT ''"); } catch {}
   try { db.exec("ALTER TABLE users ADD COLUMN nativeLanguage TEXT NOT NULL DEFAULT ''"); } catch {}
   try { db.exec("ALTER TABLE users ADD COLUMN targetLanguage TEXT NOT NULL DEFAULT ''"); } catch {}
+  try { db.exec("ALTER TABLE users ADD COLUMN phone TEXT"); } catch {}
+  // SQLite doesn't accept UNIQUE inside ALTER TABLE ADD COLUMN — the whole
+  // statement is refused. Enforce uniqueness with a partial index instead so
+  // multiple rows with NULL/empty phone (existing email-only users) are still
+  // allowed while real phone numbers stay one-per-user.
+  try { db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_users_phone ON users(phone) WHERE phone IS NOT NULL AND phone != ''"); } catch {}
+  try { db.exec("ALTER TABLE users ADD COLUMN gender TEXT NOT NULL DEFAULT ''"); } catch {}
+  try { db.exec("ALTER TABLE users ADD COLUMN avatarId TEXT NOT NULL DEFAULT ''"); } catch {}
+
+  // Invitation system (slice J). displayId is the user-facing 11-digit (or
+  // 4-10 for OFFICIAL bloodline) account number, assigned only after an
+  // inviter confirms. invitedBy is the internal userId of the person who
+  // approved this account (or the OFFICIAL account for cold-start users).
+  try { db.exec("ALTER TABLE users ADD COLUMN displayId TEXT"); } catch {}
+  try { db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_users_displayId ON users(displayId) WHERE displayId IS NOT NULL AND displayId != ''"); } catch {}
+  try { db.exec("ALTER TABLE users ADD COLUMN invitedBy TEXT"); } catch {}
+  try { db.exec("ALTER TABLE users ADD COLUMN isConfirmed INTEGER NOT NULL DEFAULT 0"); } catch {}
+  try { db.exec("ALTER TABLE users ADD COLUMN confirmedAt INTEGER"); } catch {}
+
+  // Pending invitation record. One row per apply() call. status transitions:
+  //   pending → confirmed | rejected | expired
+  // 2-minute timeout enforced by expiresAt; the API layer also lazy-expires
+  // on read so stale rows don't need a tight cron loop.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS invitations (
+      id            INTEGER PRIMARY KEY AUTOINCREMENT,
+      guestUserId   TEXT NOT NULL,
+      targetUserId  TEXT NOT NULL,
+      method        TEXT NOT NULL DEFAULT 'manual',
+      roomId        TEXT,
+      createdAt     INTEGER NOT NULL,
+      expiresAt     INTEGER NOT NULL,
+      status        TEXT NOT NULL DEFAULT 'pending',
+      FOREIGN KEY (guestUserId) REFERENCES users(userId),
+      FOREIGN KEY (targetUserId) REFERENCES users(userId)
+    );
+  `);
+  try { db.exec("CREATE INDEX IF NOT EXISTS idx_invitations_target ON invitations(targetUserId, status)"); } catch {}
+  try { db.exec("CREATE INDEX IF NOT EXISTS idx_invitations_guest ON invitations(guestUserId, status)"); } catch {}
+
+  // Immutable audit ledger — one row per confirmation. HMAC-signed so any
+  // later tampering (or fraudulent export) can be detected. displayId is
+  // primary key because it's assigned once and never reused.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS invitation_records (
+      displayId        TEXT PRIMARY KEY,
+      parentDisplayId  TEXT NOT NULL,
+      parentUserId     TEXT NOT NULL,
+      method           TEXT NOT NULL,
+      roomId           TEXT,
+      issuedAt         INTEGER NOT NULL,
+      signature        TEXT NOT NULL
+    );
+  `);
+
+  // Web Push VAPID subscriptions. One user may subscribe from multiple
+  // browsers/devices — (userId, endpoint) composite PK allows that.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS push_subscriptions (
+      userId    TEXT NOT NULL,
+      endpoint  TEXT NOT NULL,
+      p256dh    TEXT NOT NULL,
+      auth      TEXT NOT NULL,
+      createdAt INTEGER NOT NULL,
+      PRIMARY KEY (userId, endpoint),
+      FOREIGN KEY (userId) REFERENCES users(userId)
+    );
+  `);
+  try { db.exec("CREATE INDEX IF NOT EXISTS idx_push_subs_user ON push_subscriptions(userId)"); } catch {}
 
   seedTags(db);
+  seedOfficialAccount(db);
 }
+
+/** Seed the OFFICIAL root account (displayId '100'). Users applying with
+ *  '100' as inviter go through the Path C auto-confirm route. Idempotent —
+ *  safe to run on every startup. */
+function seedOfficialAccount(db: Database.Database) {
+  const OFFICIAL_USER_ID = "official-root";
+  const OFFICIAL_DISPLAY_ID = "100";
+  const existing = db.prepare("SELECT userId FROM users WHERE userId=?").get(OFFICIAL_USER_ID);
+  if (!existing) {
+    db.prepare(
+      "INSERT INTO users (userId, username, isRegistered, isConfirmed, displayId, confirmedAt, createdAt) VALUES (?, ?, 1, 1, ?, ?, ?)",
+    ).run(OFFICIAL_USER_ID, "QVideoChat 官方", OFFICIAL_DISPLAY_ID, Date.now(), Date.now());
+    console.log(`[db] seeded OFFICIAL root account (displayId=${OFFICIAL_DISPLAY_ID})`);
+  }
+}
+
+export const OFFICIAL_USER_ID = "official-root";
+export const OFFICIAL_DISPLAY_ID = "100";
 
 function seedTags(db: Database.Database) {
   const count = db.prepare("SELECT COUNT(*) as c FROM tags").get() as { c: number };
@@ -209,6 +297,80 @@ export function loginUser(email: string, password: string) {
   const token = crypto.randomBytes(16).toString("hex");
   d.prepare("UPDATE users SET token=? WHERE userId=?").run(token, row.userId);
   return { userId: row.userId, username: row.username, token };
+}
+
+/** Universal-login: match the identifier against email OR phone OR displayId
+ *  (whichever hits first). Same password verification as `loginUser`. Used
+ *  by /api/auth/login-identifier so the client doesn't have to pick which
+ *  column to hit — the user just types "whatever they remember". */
+export function loginByIdentifier(identifier: string, password: string) {
+  const d = getDb();
+  const row = d.prepare(
+    "SELECT * FROM users WHERE (email=? OR phone=? OR displayId=?) AND isRegistered=1 LIMIT 1",
+  ).get(identifier, identifier, identifier) as any;
+  if (!row || !row.passwordHash) return null;
+  const [salt, hash] = row.passwordHash.split(":");
+  const check = crypto.pbkdf2Sync(password, salt, 10000, 64, "sha512").toString("hex");
+  if (check !== hash) return null;
+  const token = crypto.randomBytes(16).toString("hex");
+  d.prepare("UPDATE users SET token=? WHERE userId=?").run(token, row.userId);
+  return { userId: row.userId, username: row.username, token };
+}
+
+/** Sign in or sign up via phone. If the phone already maps to a registered
+ *  user, rotate the token and hand it back. Otherwise create a fresh user
+ *  with `isRegistered=1` and no email/password (phone is their identity). */
+export function loginOrCreateByPhone(phone: string, defaultUsername = "", deviceId = "", referredBy = ""): { userId: string; username: string; token: string; isNew: boolean } {
+  const d = getDb();
+  if (deviceId && isDeviceBanned(deviceId)) {
+    throw new Error("DEVICE_BANNED");
+  }
+  const row = d.prepare("SELECT * FROM users WHERE phone=? AND isRegistered=1").get(phone) as any;
+  const token = crypto.randomBytes(16).toString("hex");
+  if (row) {
+    d.prepare("UPDATE users SET token=? WHERE userId=?").run(token, row.userId);
+    return { userId: row.userId, username: row.username, token, isNew: false };
+  }
+  const userId = crypto.randomUUID().slice(0, 12);
+  const username = (defaultUsername && defaultUsername.trim()) || `用户${phone.slice(-4)}`;
+  d.prepare(
+    "INSERT INTO users (userId, username, isRegistered, phone, token, deviceId, referredBy, createdAt) VALUES (?, ?, 1, ?, ?, ?, ?, ?)",
+  ).run(userId, username, phone, token, deviceId, referredBy, Date.now());
+  return { userId, username, token, isNew: true };
+}
+
+/** Read the four "user preferences" fields we sync across devices. Called by
+ *  the client on login so it can seed localStorage with the server-side
+ *  authoritative values (avatar, gender, language pair). */
+export function getUserPrefs(userId: string): { gender: string; avatarId: string; nativeLanguage: string; targetLanguage: string } | null {
+  const d = getDb();
+  const row = d.prepare(
+    "SELECT gender, avatarId, nativeLanguage, targetLanguage FROM users WHERE userId=?",
+  ).get(userId) as any;
+  if (!row) return null;
+  return {
+    gender: row.gender || "",
+    avatarId: row.avatarId || "",
+    nativeLanguage: row.nativeLanguage || "",
+    targetLanguage: row.targetLanguage || "",
+  };
+}
+
+/** Merge-update prefs. Only touches fields the caller included, so a client
+ *  can push just `avatarId` without wiping the language pair. */
+export function updateUserPrefs(userId: string, prefs: Partial<{ gender: string; avatarId: string; nativeLanguage: string; targetLanguage: string }>): void {
+  const d = getDb();
+  const sets: string[] = [];
+  const vals: string[] = [];
+  for (const k of ["gender", "avatarId", "nativeLanguage", "targetLanguage"] as const) {
+    if (typeof prefs[k] === "string") {
+      sets.push(`${k}=?`);
+      vals.push(prefs[k] as string);
+    }
+  }
+  if (sets.length === 0) return;
+  vals.push(userId);
+  d.prepare(`UPDATE users SET ${sets.join(", ")} WHERE userId=?`).run(...vals);
 }
 
 // --- Tag helpers ---

@@ -4,33 +4,59 @@ import { useState, useEffect, useRef, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import NameInput from "@/components/NameInput";
 import MatchButton from "@/components/MatchButton";
-import BlendshapeDebug from "@/components/BlendshapeDebug";
 import VrmAvatar from "@/components/VrmAvatar";
 import TagSelector from "@/components/TagSelector";
+import LangFilterBar from "@/components/LangFilterBar";
 import FriendList from "@/components/FriendList";
 import LoginPrompt from "@/components/LoginPrompt";
-import SettingsModal, { getSettings } from "@/components/SettingsModal";
+import SettingsModal from "@/components/SettingsModal";
+import OnboardingWizard from "@/components/OnboardingWizard";
+import CommunityGuidelinesModal, { needsCommunityGate } from "@/components/CommunityGuidelinesModal";
+import NoCameraMatchNotice from "@/components/NoCameraMatchNotice";
 import { useFaceMesh } from "@/hooks/useFaceMesh";
 import { useSocket } from "@/hooks/useSocket";
 import { useUser } from "@/hooks/useUser";
+import { useSelectedAvatar } from "@/hooks/useSelectedAvatar";
+import { AVATARS, DEFAULT_AVATAR_ID } from "@/lib/avatars";
 import { preloadSherpa } from "@/lib/ai/sherpa-engine";
 import { preloadPair } from "@/lib/ai/translate";
 import type { MatchEvents, SignalEvents } from "@/hooks/useSocket";
+
+// Rotating showcase for the "换个化身试试" banner. Pulled from AVATARS at
+// module init so the copy can never drift out of sync with the actual roster
+// (v1.2.3.001 shipped hard-coded names for chars that didn't exist — that's
+// exactly what this closes off).
+const FEATURED_BANNER_NAMES = AVATARS
+  .filter((a) => a.id !== DEFAULT_AVATAR_ID)
+  .slice(0, 3)
+  .map((a) => a.name)
+  .join(" · ");
 
 export default function Home() {
   const router = useRouter();
   const { user, loading: userLoading, createUser } = useUser();
   const [username, setUsername] = useState("");
   const [matchStatus, setMatchStatus] = useState<"idle" | "matching">("idle");
-  const [showDebug, setShowDebug] = useState(false);
   const [showFriends, setShowFriends] = useState(false);
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
   const [friendRequest, setFriendRequest] = useState<{ fromUserId: string; fromUsername: string } | null>(null);
   const [banMsg, setBanMsg] = useState("");
   const [showLoginModal, setShowLoginModal] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
+  // Camera-off warning modal. Fires when the user tries to match without ever
+  // opening the camera — parent-owned so runMatch can be re-invoked on the
+  // Proceed branch without wiring the whole match closure into the modal.
+  const [showNoCameraNotice, setShowNoCameraNotice] = useState(false);
   const usernameRef = useRef(username);
   usernameRef.current = username;
+
+  // Pick avatar hero size once at mount from viewport width so mobile / desktop
+  // both fit without re-measuring on resize (VrmAvatar's WebGL effect keys on
+  // `size`, so changing it would dispose+reload the ~25MB VRM).
+  const [avatarSize] = useState(() => {
+    if (typeof window === "undefined") return 320;
+    return Math.min(window.innerWidth - 32, 360);
+  });
 
   // Restore username from user state
   useEffect(() => {
@@ -75,12 +101,90 @@ export default function Home() {
 
   const { isConnected, joinMatch, cancelMatch, socketRef } = useSocket(matchEvents, signalEvents);
   const { blendshapeRef, poseRef, isLoaded, isCameraOn, error, step, faceFound, start, stop, toggleCamera } = useFaceMesh();
-
-  const handleToggleCamera = async () => {
-    toggleCamera();
-  };
+  const { selectedEntry } = useSelectedAvatar();
 
   useEffect(() => () => stop(), [stop]);
+
+  // Community-gate takes precedence over onboarding. Both are per-browser
+  // localStorage gates, resolved after the first client-side effect so SSR
+  // and initial paint agree (`null` until then).
+  const [showCommunityGate, setShowCommunityGate] = useState<boolean | null>(null);
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    setShowCommunityGate(needsCommunityGate());
+  }, []);
+
+  // Onboarding gate. Read `qv_onboarded` on mount; if it's missing, mount the
+  // wizard. `showOnboarding=null` during hydration to avoid SSR/CSR mismatch
+  // (localStorage isn't available on the server), then resolves to boolean
+  // after the first client-side effect.
+  const [showOnboarding, setShowOnboarding] = useState<boolean | null>(null);
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    setShowOnboarding(localStorage.getItem("qv_onboarded") !== "1");
+  }, []);
+
+  // Avatar-preview banner state. Same hydration dance — read once client-side,
+  // hide forever after the user dismisses it (per-browser localStorage).
+  const [showAvatarBanner, setShowAvatarBanner] = useState<boolean | null>(null);
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    setShowAvatarBanner(localStorage.getItem("qv_avatar_banner_hidden") !== "1");
+  }, []);
+
+  const dismissAvatarBanner = () => {
+    try {
+      localStorage.setItem("qv_avatar_banner_hidden", "1");
+      const key = "qv_avatar_banner_dismiss";
+      const n = parseInt(localStorage.getItem(key) || "0", 10) + 1;
+      localStorage.setItem(key, String(n));
+    } catch { /* ignore */ }
+    setShowAvatarBanner(false);
+  };
+
+  const openAvatarPage = () => {
+    try {
+      const key = "qv_avatar_banner_click";
+      const n = parseInt(localStorage.getItem(key) || "0", 10) + 1;
+      localStorage.setItem(key, String(n));
+    } catch { /* ignore */ }
+    router.push("/avatars");
+  };
+
+  // Separate counter from openAvatarPage: this fires from the always-visible
+  // pill under the hero, not from the dismissible top banner. Splitting them
+  // lets us see which entry point returning users actually reach for once the
+  // banner has been closed.
+  const openAvatarFromHero = () => {
+    try {
+      const key = "qv_avatar_hero_click";
+      const n = parseInt(localStorage.getItem(key) || "0", 10) + 1;
+      localStorage.setItem(key, String(n));
+    } catch { /* ignore */ }
+    router.push("/avatars");
+  };
+
+  const completeOnboarding = () => {
+    try {
+      localStorage.setItem("qv_onboarded", "1");
+      localStorage.setItem("qv_onboarded_at", String(Date.now()));
+    } catch { /* ignore */ }
+    setShowOnboarding(false);
+  };
+
+  // Auto-open camera for returning users (qv_onboarded flag set by the wizard
+  // in A3). First-time users don't trigger a permission dialog on landing —
+  // they'll see it during onboarding step 3 as an explained gesture.
+  const autoStartTriedRef = useRef(false);
+  useEffect(() => {
+    if (autoStartTriedRef.current) return;
+    if (typeof window === "undefined") return;
+    autoStartTriedRef.current = true;
+    const onboarded = localStorage.getItem("qv_onboarded") === "1";
+    if (onboarded) {
+      start();
+    }
+  }, [start]);
 
   // Warm up the ASR + translation pipelines from the home page so they're
   // ready by the time the user finishes matching. Two rules learned the hard
@@ -116,11 +220,13 @@ export default function Home() {
     })();
   }, []);
 
-  const handleMatch = async () => {
+  // The actual match kickoff: create user if needed, unlock autoplay, and
+  // route into the room. Kept separate from handleMatch so the camera-off
+  // warning modal can invoke it directly on Proceed without duplicating logic.
+  const runMatch = async () => {
     if (!isConnected) return;
     const name = username.trim();
     if (!name) return;
-    // Ensure we have a server-side user with token
     let uid = user?.userId;
     if (!uid || !user?.token) {
       try {
@@ -136,20 +242,55 @@ export default function Home() {
     // audio.play() may be blocked by autoplay policy.
     const ac = new (window.AudioContext || (window as any).webkitAudioContext)();
     ac.resume();
-    // Persist tags for /room to pick up. Empty array means "match anyone".
     try {
       localStorage.setItem("qv_pendingTags", JSON.stringify(selectedTags));
     } catch { /* ignore */ }
-    // Skip queuing on this page — go straight to the room shell so the user
-    // sees their own avatar preview immediately. /room will call joinMatch
-    // once its own socket is connected, and fills the partner slot on
-    // match:found without navigating.
     const params = new URLSearchParams({
       uid,
       uname: name,
       reg: user?.isRegistered ? "1" : "0",
     });
     router.push(`/room?${params.toString()}`);
+  };
+
+  const handleMatch = () => {
+    // Guard rails first: don't waste modal cycles on states the primary button
+    // is already disabled for.
+    if (!isConnected) return;
+    if (!username.trim()) return;
+    // Camera-off soft gate. Fires ONCE per session (sessionStorage, not
+    // localStorage) so repeat matches don't nag, but a fresh browser session
+    // still gets the gentle reminder + norms nudge. If camera is on, straight
+    // through.
+    if (!isCameraOn) {
+      let acked = false;
+      try { acked = sessionStorage.getItem("qv_no_camera_ack") === "1"; } catch { /* ignore */ }
+      if (!acked) {
+        setShowNoCameraNotice(true);
+        return;
+      }
+    }
+    runMatch();
+  };
+
+  const handleNoCameraProceed = () => {
+    try {
+      sessionStorage.setItem("qv_no_camera_ack", "1");
+      const key = "qv_no_camera_proceed";
+      const n = parseInt(localStorage.getItem(key) || "0", 10) + 1;
+      localStorage.setItem(key, String(n));
+    } catch { /* ignore */ }
+    setShowNoCameraNotice(false);
+    runMatch();
+  };
+
+  const handleNoCameraCancel = () => {
+    try {
+      const key = "qv_no_camera_cancel";
+      const n = parseInt(localStorage.getItem(key) || "0", 10) + 1;
+      localStorage.setItem(key, String(n));
+    } catch { /* ignore */ }
+    setShowNoCameraNotice(false);
   };
 
   if (userLoading) {
@@ -161,9 +302,13 @@ export default function Home() {
   }
 
   return (
-    <main className="flex min-h-screen flex-col items-center justify-center gap-8 p-4">
+    <main className="relative flex min-h-screen flex-col items-center px-4 pt-6 pb-8 gap-5">
+      {/* Top-right nav */}
       <div className="absolute top-4 right-4 flex gap-2 items-center">
-        <span className={`w-2 h-2 rounded-full ${isConnected ? "bg-green-500" : "bg-red-500"}`} title={isConnected ? "已连接服务器" : "未连接服务器"} />
+        <span
+          className={`w-2 h-2 rounded-full ${isConnected ? "bg-green-500" : "bg-red-500"}`}
+          title={isConnected ? "已连接服务器" : "未连接服务器"}
+        />
         <MatchButton label="⚙" variant="secondary" onClick={() => setShowSettings(true)} />
         {user?.isRegistered ? (
           <>
@@ -203,9 +348,36 @@ export default function Home() {
         </div>
       )}
 
-      <h1 className="text-3xl font-bold tracking-tight">QVideoChat</h1>
-      <p className="text-neutral-400 text-sm">Q版虚拟形象 · 随机匹配通话</p>
-      <p className="text-neutral-600 text-[10px]">v{process.env.NEXT_PUBLIC_APP_VERSION || "0.0.0"}</p>
+      {/* Compact brand */}
+      <div className="flex flex-col items-center gap-1 mt-2">
+        <h1 className="text-2xl font-bold tracking-tight">QVideoChat</h1>
+        <p className="text-neutral-500 text-[11px]">Q版虚拟形象 · 随机匹配通话</p>
+      </div>
+
+      {/* Avatar-preview banner — small callout to /avatars until L1 商城 ships.
+          Dismissible so it doesn't nag returning users. */}
+      {showAvatarBanner && (
+        <div className="w-full max-w-sm flex items-center gap-2 rounded-full bg-gradient-to-r from-purple-500/15 to-pink-500/15 border border-purple-500/25 pl-4 pr-2 py-1.5">
+          <button
+            type="button"
+            onClick={openAvatarPage}
+            className="flex-1 flex items-center gap-2 text-xs text-neutral-200 hover:text-white transition"
+          >
+            <span>✨</span>
+            <span className="font-medium">换个化身试试</span>
+            <span className="text-neutral-400">{FEATURED_BANNER_NAMES}</span>
+            <span className="ml-auto text-neutral-400">→</span>
+          </button>
+          <button
+            type="button"
+            onClick={dismissAvatarBanner}
+            aria-label="关闭"
+            className="w-6 h-6 rounded-full text-neutral-500 hover:text-white hover:bg-white/10 transition text-xs"
+          >
+            ×
+          </button>
+        </div>
+      )}
 
       {!isConnected && matchStatus === "idle" && (
         <div className="flex items-center gap-2 rounded-full bg-red-900/20 border border-red-800/50 px-3 py-1">
@@ -214,22 +386,84 @@ export default function Home() {
         </div>
       )}
 
-      <NameInput value={username} onChange={setUsername} disabled={matchStatus !== "idle"} />
-
-      <TagSelector selected={selectedTags} onChange={setSelectedTags} />
-
-      {matchStatus === "idle" && (
-        <MatchButton
-          label="开始匹配"
-          disabled={!username.trim()}
-          onClick={handleMatch}
+      {/* Hero: avatar always mounted so the character is always visible even
+          when the camera is off (idle rest pose + breath keeps it alive). */}
+      <div className="flex flex-col items-center gap-2">
+        <VrmAvatar
+          blendshapeRef={blendshapeRef}
+          poseRef={poseRef}
+          size={avatarSize}
+          vrmPath={selectedEntry.vrmPath}
+          placeholderEmoji={selectedEntry.emoji}
+          placeholderTint={selectedEntry.tint}
+          mirror
         />
+        {/* One-line status under the avatar. Priorities:
+              error > tracker-loading > face-not-found > tracking > idle-CTA */}
+        <div className="min-h-[28px] flex items-center justify-center text-xs text-center">
+          {error && <span className="text-red-400">{error}</span>}
+          {!error && step && !isLoaded && (
+            <span className="text-yellow-400">加载中: {step}</span>
+          )}
+          {!error && isLoaded && !faceFound && (
+            <span className="text-yellow-500">追踪就绪 · 未检测到人脸</span>
+          )}
+          {!error && faceFound && (
+            <span className="text-green-500">追踪中</span>
+          )}
+          {!error && !isLoaded && !step && (
+            <button
+              onClick={toggleCamera}
+              className="inline-flex items-center gap-2 rounded-full bg-white/10 hover:bg-white/20 border border-white/25 hover:border-white/50 px-3.5 py-1 text-[11px] text-neutral-100 shadow-sm transition"
+            >
+              <span aria-hidden>📷</span>
+              <span>打开摄像头,让化身跟着你笑</span>
+              <span className="text-neutral-400" aria-hidden>→</span>
+            </button>
+          )}
+        </div>
+        {/* Persistent avatar-swap entry point. Sits directly under the hero so
+            it survives banner dismissal — that dismissible top banner is a
+            noticeable-once affordance; this pill is the always-on one that
+            returning users can find without hunting. */}
+        <button
+          type="button"
+          onClick={openAvatarFromHero}
+          className="group inline-flex items-center gap-1.5 rounded-full border border-white/10 hover:border-white/30 bg-white/5 hover:bg-white/10 px-3 py-1 text-[11px] text-neutral-300 transition"
+        >
+          <span className="text-neutral-500">化身</span>
+          <span className="font-medium text-neutral-100">{selectedEntry.name}</span>
+          <span className="text-purple-300 group-hover:text-purple-200">换一换 →</span>
+        </button>
+      </div>
+
+      {/* Name input (hidden once the user is registered — they already have one) */}
+      {!user?.isRegistered && (
+        <NameInput value={username} onChange={setUsername} disabled={matchStatus !== "idle"} />
       )}
 
-      {matchStatus === "matching" && (
-        <div className="flex flex-col items-center gap-4">
-          <div className="h-8 w-8 animate-spin rounded-full border-2 border-neutral-600 border-t-white" />
-          <p className="text-neutral-400">正在寻找匹配对象...</p>
+      {/* Tag selector */}
+      <TagSelector selected={selectedTags} onChange={setSelectedTags} />
+
+      {/* Language pair — feeds match scoring server-side and drives subtitle
+          translation in the room. Persists to qv_sl / qv_tl, same keys the
+          Onboarding wizard writes. */}
+      <LangFilterBar />
+
+      {/* Primary CTA — matches the marketing site's gradient look for a
+          consistent brand impression once the user lands from justsaysayforfun.com/. */}
+      {matchStatus === "idle" ? (
+        <button
+          onClick={handleMatch}
+          disabled={!username.trim() || !isConnected}
+          className="w-full max-w-xs rounded-2xl bg-gradient-to-r from-purple-500 to-pink-500 hover:from-purple-600 hover:to-pink-600 px-8 py-3.5 text-base font-semibold shadow-xl shadow-purple-500/25 disabled:opacity-40 disabled:cursor-not-allowed disabled:shadow-none transition"
+        >
+          开始匹配
+        </button>
+      ) : (
+        <div className="flex flex-col items-center gap-3">
+          <div className="h-6 w-6 animate-spin rounded-full border-2 border-neutral-600 border-t-white" />
+          <p className="text-neutral-400 text-sm">正在寻找匹配对象...</p>
           <MatchButton
             label="取消"
             variant="secondary"
@@ -238,34 +472,12 @@ export default function Home() {
         </div>
       )}
 
-      <hr className="w-64 border-neutral-800" />
-
-      <MatchButton
-        label={isLoaded ? "📷 关闭" : "📷 摄像头"}
-        variant="secondary"
-        onClick={handleToggleCamera}
-      />
-
-      {error && <p className="text-red-400 text-sm">{error}</p>}
       {banMsg && <p className="text-red-400 text-sm">{banMsg}</p>}
-      {isLoaded && !faceFound && <p className="text-yellow-400 text-xs">追踪就绪 · 未检测到人脸</p>}
-      {faceFound && <p className="text-green-400 text-xs">追踪就绪 · 人脸检测中</p>}
-      {step && !isLoaded && <p className="text-yellow-400 text-xs">加载中: {step}</p>}
 
-      {isLoaded && (
-        <div className="flex flex-col xl:flex-row items-center gap-6">
-          <VrmAvatar blendshapeRef={blendshapeRef} poseRef={poseRef} size={320} label="预览 (本地)" mirror />
-          {showDebug && <BlendshapeDebug blendshapeRef={blendshapeRef} />}
-        </div>
-      )}
-
-      {isLoaded && (
-        <MatchButton
-          label={showDebug ? "隐藏 debug" : "显示 blendshape debug"}
-          variant="secondary"
-          onClick={() => setShowDebug((v) => !v)}
-        />
-      )}
+      {/* Footer version — pushed to bottom via mt-auto */}
+      <p className="text-neutral-700 text-[10px] mt-auto pt-4">
+        v{process.env.NEXT_PUBLIC_APP_VERSION || "0.0.0"}
+      </p>
 
       <FriendList
         isOpen={showFriends}
@@ -275,6 +487,26 @@ export default function Home() {
 
       <LoginPrompt show={showLoginModal} onClose={() => setShowLoginModal(false)} />
       <SettingsModal show={showSettings} onClose={() => setShowSettings(false)} />
+
+      <OnboardingWizard
+        show={showOnboarding === true && showCommunityGate === false}
+        onComplete={completeOnboarding}
+        onOpenCamera={start}
+        onGoToAvatars={openAvatarFromHero}
+        selectedTags={selectedTags}
+        onTagsChange={setSelectedTags}
+      />
+
+      {showCommunityGate === true && (
+        <CommunityGuidelinesModal onAccept={() => setShowCommunityGate(false)} />
+      )}
+
+      {showNoCameraNotice && (
+        <NoCameraMatchNotice
+          onProceed={handleNoCameraProceed}
+          onCancel={handleNoCameraCancel}
+        />
+      )}
     </main>
   );
 }

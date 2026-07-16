@@ -1,0 +1,408 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>QVideoChat · 戴上你的虚拟形象,和世界打个招呼</title>
+<meta name="description" content="Q 版虚拟形象随机匹配视频通话。面部表情实时同步 · AI 实时翻译 · 兴趣精准匹配。匿名安全,免费开始。">
+<meta name="keywords" content="虚拟形象,视频通话,随机匹配,VTuber,化身,AI 翻译,陌生人视频">
+<meta name="theme-color" content="#0a0a0a">
+
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://www.justsaysayforfun.com/">
+<meta property="og:title" content="QVideoChat · 戴上虚拟形象和世界打招呼">
+<meta property="og:description" content="Q 版化身随机匹配视频通话 · 表情同步 · AI 实时翻译">
+<meta name="twitter:card" content="summary_large_image">
+
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E🎭%3C/text%3E%3C/svg%3E">
+
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+  tailwind.config = {
+    theme: {
+      extend: {
+        colors: {
+          brand: {
+            50: '#faf5ff', 500: '#a855f7', 600: '#9333ea', 700: '#7e22ce',
+          },
+          accent: {
+            500: '#ec4899', 600: '#db2777',
+          }
+        }
+      }
+    }
+  }
+</script>
+
+<style>
+  html { scroll-behavior: smooth; }
+  body {
+    background: #0a0a0a;
+    color: #fafafa;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  /* Ambient background gradient — subtle, doesn't fight content */
+  body::before {
+    content: '';
+    position: fixed; inset: 0; z-index: -1;
+    background:
+      radial-gradient(ellipse at 20% 10%, rgba(168, 85, 247, 0.15) 0%, transparent 50%),
+      radial-gradient(ellipse at 80% 60%, rgba(236, 72, 153, 0.12) 0%, transparent 50%),
+      #0a0a0a;
+  }
+  @keyframes float {
+    0%, 100% { transform: translateY(0px); }
+    50% { transform: translateY(-14px); }
+  }
+  @keyframes floatSlow {
+    0%, 100% { transform: translateY(0px) rotate(0deg); }
+    50% { transform: translateY(-8px) rotate(3deg); }
+  }
+  @keyframes pulse-glow {
+    0%, 100% { opacity: 0.35; transform: scale(1); }
+    50% { opacity: 0.55; transform: scale(1.05); }
+  }
+  @keyframes fade-up {
+    from { opacity: 0; transform: translateY(24px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+  .float { animation: float 4s ease-in-out infinite; }
+  .float-slow { animation: floatSlow 6s ease-in-out infinite; }
+  .pulse-glow { animation: pulse-glow 4s ease-in-out infinite; }
+  .fade-up { animation: fade-up 0.8s ease-out both; }
+  .fade-up-1 { animation: fade-up 0.8s ease-out 0.15s both; }
+  .fade-up-2 { animation: fade-up 0.8s ease-out 0.3s both; }
+  details > summary { list-style: none; }
+  details > summary::-webkit-details-marker { display: none; }
+  details[open] .chev { transform: rotate(180deg); }
+  .chev { transition: transform 0.2s ease; }
+</style>
+</head>
+
+<body class="min-h-screen">
+
+<!-- ═══ Nav ═══ -->
+<nav class="fixed top-0 left-0 right-0 z-40 backdrop-blur-md bg-black/30 border-b border-white/5">
+  <div class="max-w-6xl mx-auto px-6 py-4 flex items-center justify-between">
+    <a href="/" class="flex items-center gap-2 text-lg font-bold tracking-tight">
+      <span class="inline-block w-8 h-8 rounded-lg bg-gradient-to-br from-brand-500 to-accent-500 flex items-center justify-center text-base">🎭</span>
+      <span>QVideoChat</span>
+    </a>
+    <div class="flex items-center gap-3 sm:gap-6">
+      <a href="#features" class="hidden sm:block text-sm text-neutral-400 hover:text-white transition">功能</a>
+      <a href="#how" class="hidden sm:block text-sm text-neutral-400 hover:text-white transition">怎么用</a>
+      <a href="#faq" class="hidden sm:block text-sm text-neutral-400 hover:text-white transition">常见问题</a>
+      <a href="/qvideochat" class="rounded-full bg-gradient-to-r from-brand-500 to-accent-500 hover:from-brand-600 hover:to-accent-600 px-4 py-2 text-sm font-semibold shadow-lg shadow-brand-500/20 transition">
+        进入应用
+      </a>
+    </div>
+  </div>
+</nav>
+
+<!-- ═══ Hero ═══ -->
+<section class="min-h-screen flex items-center justify-center px-6 pt-24 pb-16">
+  <div class="max-w-6xl w-full grid md:grid-cols-2 gap-12 md:gap-16 items-center">
+    <div>
+      <div class="inline-flex items-center gap-2 rounded-full bg-brand-500/10 border border-brand-500/30 px-3 py-1 mb-6 fade-up">
+        <span class="w-2 h-2 rounded-full bg-brand-500 animate-pulse"></span>
+        <span class="text-xs text-brand-500 font-medium">全新 v1.2 · 已上线</span>
+      </div>
+      <h1 class="text-4xl sm:text-5xl md:text-6xl font-bold tracking-tight leading-[1.1] mb-6 fade-up">
+        戴上你的<br>
+        <span class="bg-gradient-to-r from-brand-500 via-accent-500 to-brand-500 bg-clip-text text-transparent">虚拟形象</span><br>
+        和世界打个招呼
+      </h1>
+      <p class="text-base sm:text-lg md:text-xl text-neutral-400 mb-8 leading-relaxed fade-up-1">
+        Q 版化身随机匹配视频通话。<br>
+        面部表情实时同步 · AI 实时翻译 · 兴趣精准匹配。
+      </p>
+      <div class="flex flex-col sm:flex-row gap-3 fade-up-2">
+        <a href="/qvideochat" class="inline-flex items-center justify-center rounded-2xl bg-gradient-to-r from-brand-500 to-accent-500 hover:from-brand-600 hover:to-accent-600 px-8 py-4 text-base font-semibold shadow-xl shadow-brand-500/30 transition transform hover:scale-105">
+          立即试用 →
+        </a>
+        <a href="#features" class="inline-flex items-center justify-center rounded-2xl border border-white/10 hover:border-white/30 bg-white/5 hover:bg-white/10 px-8 py-4 text-base font-medium text-neutral-200 transition">
+          了解更多
+        </a>
+      </div>
+      <p class="mt-5 text-xs text-neutral-500 fade-up-2">免费开始 · 无需下载 · 3 秒进入</p>
+    </div>
+
+    <!-- Hero visual: 化身占位 (待补真机录屏) -->
+    <div class="flex justify-center fade-up-1">
+      <div class="relative w-full max-w-md aspect-square">
+        <!-- 外层柔光 -->
+        <div class="absolute -inset-8 rounded-full bg-gradient-to-r from-brand-500 to-accent-500 blur-3xl opacity-30 pulse-glow"></div>
+        <!-- 卡片本体 -->
+        <div class="relative w-full h-full rounded-[2rem] bg-gradient-to-br from-neutral-900/80 to-neutral-950/80 border border-white/10 backdrop-blur-md overflow-hidden shadow-2xl">
+          <!-- 内部渐变 -->
+          <div class="absolute inset-0 bg-gradient-to-br from-brand-500/10 via-transparent to-accent-500/10"></div>
+          <!-- 中央大 emoji "化身" -->
+          <div class="absolute inset-0 flex items-center justify-center">
+            <div class="text-[12rem] float select-none" role="img" aria-label="虚拟化身">🥰</div>
+          </div>
+          <!-- 飘浮元素 -->
+          <div class="absolute top-8 left-8 text-3xl float-slow select-none" style="animation-delay: 0.5s">✨</div>
+          <div class="absolute top-12 right-10 text-2xl float-slow select-none" style="animation-delay: 1.2s">💜</div>
+          <div class="absolute bottom-16 left-12 text-2xl float-slow select-none" style="animation-delay: 1.8s">🎭</div>
+          <div class="absolute bottom-8 right-8 text-3xl float-slow select-none" style="animation-delay: 2.4s">🌸</div>
+          <!-- 底部信息条 -->
+          <div class="absolute bottom-4 left-4 right-4 flex items-center justify-between text-xs text-neutral-500">
+            <div class="flex items-center gap-2">
+              <span class="w-2 h-2 rounded-full bg-green-500 animate-pulse"></span>
+              <span>表情追踪中</span>
+            </div>
+            <span>60fps</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══ Features ═══ -->
+<section id="features" class="py-24 px-6">
+  <div class="max-w-6xl mx-auto">
+    <div class="text-center mb-16">
+      <p class="text-brand-500 text-sm font-semibold tracking-widest mb-3">核心功能</p>
+      <h2 class="text-3xl sm:text-4xl md:text-5xl font-bold tracking-tight mb-4">
+        为什么选择 QVideoChat
+      </h2>
+      <p class="text-neutral-400 max-w-2xl mx-auto">
+        四个不一样,让陌生人视频聊天变得舒服、有趣、有安全感。
+      </p>
+    </div>
+
+    <div class="grid sm:grid-cols-2 lg:grid-cols-4 gap-5">
+      <div class="rounded-3xl bg-white/[0.03] border border-white/10 p-7 hover:border-brand-500/40 hover:bg-white/[0.05] transition group">
+        <div class="w-14 h-14 rounded-2xl bg-brand-500/15 flex items-center justify-center mb-5 text-3xl group-hover:scale-110 transition">🎭</div>
+        <h3 class="text-lg font-semibold mb-3">化身出镜,匿名安全</h3>
+        <p class="text-neutral-400 text-sm leading-relaxed">
+          Q 版化身代表你,不用露脸也能表达。声音是你的,情绪是你的,面孔是化身的。
+        </p>
+      </div>
+
+      <div class="rounded-3xl bg-white/[0.03] border border-white/10 p-7 hover:border-accent-500/40 hover:bg-white/[0.05] transition group">
+        <div class="w-14 h-14 rounded-2xl bg-accent-500/15 flex items-center justify-center mb-5 text-3xl group-hover:scale-110 transition">😊</div>
+        <h3 class="text-lg font-semibold mb-3">表情实时同步</h3>
+        <p class="text-neutral-400 text-sm leading-relaxed">
+          MediaPipe 精准捕捉微笑、眨眼、说话嘴型,60fps 同步给对方,自然如面对面。
+        </p>
+      </div>
+
+      <div class="rounded-3xl bg-white/[0.03] border border-white/10 p-7 hover:border-blue-500/40 hover:bg-white/[0.05] transition group">
+        <div class="w-14 h-14 rounded-2xl bg-blue-500/15 flex items-center justify-center mb-5 text-3xl group-hover:scale-110 transition">🌐</div>
+        <h3 class="text-lg font-semibold mb-3">AI 实时翻译</h3>
+        <p class="text-neutral-400 text-sm leading-relaxed">
+          说中文,对方看到英文字幕。本地推理零延迟,中英日韩全支持,跨语言无障碍。
+        </p>
+      </div>
+
+      <div class="rounded-3xl bg-white/[0.03] border border-white/10 p-7 hover:border-green-500/40 hover:bg-white/[0.05] transition group">
+        <div class="w-14 h-14 rounded-2xl bg-green-500/15 flex items-center justify-center mb-5 text-3xl group-hover:scale-110 transition">🎯</div>
+        <h3 class="text-lg font-semibold mb-3">兴趣精准匹配</h3>
+        <p class="text-neutral-400 text-sm leading-relaxed">
+          按兴趣标签找到聊得来的人,不再是"下一位、下一位"的疲劳循环。
+        </p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══ How it works ═══ -->
+<section id="how" class="py-24 px-6 bg-gradient-to-b from-transparent via-brand-500/[0.03] to-transparent">
+  <div class="max-w-5xl mx-auto">
+    <div class="text-center mb-16">
+      <p class="text-accent-500 text-sm font-semibold tracking-widest mb-3">如何开始</p>
+      <h2 class="text-3xl sm:text-4xl md:text-5xl font-bold tracking-tight mb-4">
+        30 秒,开始聊
+      </h2>
+      <p class="text-neutral-400">
+        三步搞定,不用注册,不用下载。
+      </p>
+    </div>
+
+    <div class="grid md:grid-cols-3 gap-8 md:gap-4 relative">
+      <!-- 步骤连线 -->
+      <div class="hidden md:block absolute top-8 left-1/6 right-1/6 h-px bg-gradient-to-r from-brand-500/40 via-accent-500/40 to-brand-500/40"></div>
+
+      <div class="text-center relative">
+        <div class="w-16 h-16 mx-auto rounded-full bg-gradient-to-br from-brand-500 to-accent-500 flex items-center justify-center mb-5 text-2xl font-bold shadow-lg shadow-brand-500/30 relative z-10">1</div>
+        <h3 class="text-xl font-semibold mb-2">打开摄像头</h3>
+        <p class="text-neutral-400 text-sm leading-relaxed max-w-[240px] mx-auto">
+          授权摄像头 → 化身立刻跟着你的表情动。真实面孔不上传,只在本地跑识别。
+        </p>
+      </div>
+
+      <div class="text-center relative">
+        <div class="w-16 h-16 mx-auto rounded-full bg-gradient-to-br from-brand-500 to-accent-500 flex items-center justify-center mb-5 text-2xl font-bold shadow-lg shadow-brand-500/30 relative z-10">2</div>
+        <h3 class="text-xl font-semibold mb-2">选择兴趣</h3>
+        <p class="text-neutral-400 text-sm leading-relaxed max-w-[240px] mx-auto">
+          游戏、音乐、旅行、动漫... 从标签里挑最爱的 3 个,匹配系统会用它们找人。
+        </p>
+      </div>
+
+      <div class="text-center relative">
+        <div class="w-16 h-16 mx-auto rounded-full bg-gradient-to-br from-brand-500 to-accent-500 flex items-center justify-center mb-5 text-2xl font-bold shadow-lg shadow-brand-500/30 relative z-10">3</div>
+        <h3 class="text-xl font-semibold mb-2">一键匹配</h3>
+        <p class="text-neutral-400 text-sm leading-relaxed max-w-[240px] mx-auto">
+          点开始匹配 → 平均 5 秒进入通话。聊得投缘可加好友,不合适一键下一位。
+        </p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══ Trust / Safety ═══ -->
+<section class="py-24 px-6">
+  <div class="max-w-5xl mx-auto">
+    <div class="text-center mb-16">
+      <p class="text-green-500 text-sm font-semibold tracking-widest mb-3">安全承诺</p>
+      <h2 class="text-3xl sm:text-4xl md:text-5xl font-bold tracking-tight mb-4">
+        安全,是我们的底线
+      </h2>
+      <p class="text-neutral-400 max-w-2xl mx-auto">
+        让每一次陌生人视频聊天都放心。
+      </p>
+    </div>
+
+    <div class="grid md:grid-cols-3 gap-5">
+      <div class="rounded-3xl bg-gradient-to-br from-white/[0.04] to-transparent border border-white/10 p-7">
+        <div class="text-4xl mb-4">🔒</div>
+        <h3 class="font-semibold text-lg mb-3">端到端 P2P 加密</h3>
+        <p class="text-neutral-400 text-sm leading-relaxed">
+          WebRTC 直连,音视频不经过服务器。哪怕我们想看也看不到。
+        </p>
+      </div>
+      <div class="rounded-3xl bg-gradient-to-br from-white/[0.04] to-transparent border border-white/10 p-7">
+        <div class="text-4xl mb-4">🎭</div>
+        <h3 class="font-semibold text-lg mb-3">不传真实视频</h3>
+        <p class="text-neutral-400 text-sm leading-relaxed">
+          传给对方的是化身参数(几百字节),不是原始视频。你的真实面孔从不离开本机。
+        </p>
+      </div>
+      <div class="rounded-3xl bg-gradient-to-br from-white/[0.04] to-transparent border border-white/10 p-7">
+        <div class="text-4xl mb-4">🚫</div>
+        <h3 class="font-semibold text-lg mb-3">举报即时生效</h3>
+        <p class="text-neutral-400 text-sm leading-relaxed">
+          一键举报不良行为,平台快速审核。三次举报自动加入黑名单。
+        </p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══ FAQ ═══ -->
+<section id="faq" class="py-24 px-6 bg-gradient-to-b from-transparent via-white/[0.02] to-transparent">
+  <div class="max-w-3xl mx-auto">
+    <div class="text-center mb-16">
+      <p class="text-brand-500 text-sm font-semibold tracking-widest mb-3">常见问题</p>
+      <h2 class="text-3xl sm:text-4xl md:text-5xl font-bold tracking-tight">
+        你可能想问
+      </h2>
+    </div>
+
+    <div class="space-y-3">
+      <details class="rounded-2xl bg-white/[0.03] border border-white/10 p-6 hover:border-white/20 transition">
+        <summary class="font-semibold cursor-pointer flex items-center justify-between">
+          <span>需要注册账号吗?</span>
+          <span class="chev text-neutral-500 text-sm">▼</span>
+        </summary>
+        <p class="mt-4 text-neutral-400 text-sm leading-relaxed">
+          不需要。输个昵称就能开始匹配聊天。注册后可以加好友、保留通话记录、领取每日签到奖励——这些是可选项,不是门槛。
+        </p>
+      </details>
+
+      <details class="rounded-2xl bg-white/[0.03] border border-white/10 p-6 hover:border-white/20 transition">
+        <summary class="font-semibold cursor-pointer flex items-center justify-between">
+          <span>支持哪些语言?</span>
+          <span class="chev text-neutral-500 text-sm">▼</span>
+        </summary>
+        <p class="mt-4 text-neutral-400 text-sm leading-relaxed">
+          实时字幕翻译目前支持中文、英文、日语、韩语,四种语言之间自由切换。语音识别用本地部署的 sherpa-onnx,翻译用 OPUS-MT 模型,都在你自己的浏览器里跑,响应快且不上传语音。
+        </p>
+      </details>
+
+      <details class="rounded-2xl bg-white/[0.03] border border-white/10 p-6 hover:border-white/20 transition">
+        <summary class="font-semibold cursor-pointer flex items-center justify-between">
+          <span>需要下载 App 吗?</span>
+          <span class="chev text-neutral-500 text-sm">▼</span>
+        </summary>
+        <p class="mt-4 text-neutral-400 text-sm leading-relaxed">
+          不需要。QVideoChat 完全在现代浏览器里跑(Chrome、Edge、Safari 均可),打开就用。iOS / Android 原生 App 版本正在开发中,发布后会自动同步账号和好友。
+        </p>
+      </details>
+
+      <details class="rounded-2xl bg-white/[0.03] border border-white/10 p-6 hover:border-white/20 transition">
+        <summary class="font-semibold cursor-pointer flex items-center justify-between">
+          <span>我的隐私安全吗?</span>
+          <span class="chev text-neutral-500 text-sm">▼</span>
+        </summary>
+        <p class="mt-4 text-neutral-400 text-sm leading-relaxed">
+          通话走 P2P 直连不经过服务器;传出去的是化身参数不是原始视频;你的真实面孔仅用于本地表情识别,从不上传;可以随时清除本地数据。这几条对每一位用户都一样,不看你是不是付费用户。
+        </p>
+      </details>
+
+      <details class="rounded-2xl bg-white/[0.03] border border-white/10 p-6 hover:border-white/20 transition">
+        <summary class="font-semibold cursor-pointer flex items-center justify-between">
+          <span>为什么用虚拟形象而不是真实视频?</span>
+          <span class="chev text-neutral-500 text-sm">▼</span>
+        </summary>
+        <p class="mt-4 text-neutral-400 text-sm leading-relaxed">
+          有三个原因:一是隐私——面孔不外泄;二是心理压力——化身出镜让内向的人也敢开口;三是趣味——Q 版形象天然拉近距离,尬聊的概率大幅下降。
+        </p>
+      </details>
+
+      <details class="rounded-2xl bg-white/[0.03] border border-white/10 p-6 hover:border-white/20 transition">
+        <summary class="font-semibold cursor-pointer flex items-center justify-between">
+          <span>怎么举报不良用户?</span>
+          <span class="chev text-neutral-500 text-sm">▼</span>
+        </summary>
+        <p class="mt-4 text-neutral-400 text-sm leading-relaxed">
+          通话界面的"举报"按钮一键搞定。可选理由包括骚扰、成人内容、诈骗、未成年等分类。被三次举报的用户会自动进入你的黑名单,后续匹配自动跳过。
+        </p>
+      </details>
+    </div>
+  </div>
+</section>
+
+<!-- ═══ Final CTA ═══ -->
+<section class="py-24 px-6">
+  <div class="max-w-3xl mx-auto text-center">
+    <div class="relative">
+      <div class="absolute -inset-x-20 -inset-y-8 rounded-full bg-gradient-to-r from-brand-500/20 to-accent-500/20 blur-3xl"></div>
+      <div class="relative">
+        <h2 class="text-3xl sm:text-4xl md:text-5xl font-bold tracking-tight mb-6 leading-tight">
+          准备好<br>
+          <span class="bg-gradient-to-r from-brand-500 to-accent-500 bg-clip-text text-transparent">变身</span>
+          了吗?
+        </h2>
+        <p class="text-neutral-400 mb-10 text-lg">
+          3 秒进入,不用注册,免费开始。
+        </p>
+        <a href="/qvideochat" class="inline-flex items-center justify-center rounded-2xl bg-gradient-to-r from-brand-500 to-accent-500 hover:from-brand-600 hover:to-accent-600 px-10 py-4 text-lg font-semibold shadow-xl shadow-brand-500/30 transition transform hover:scale-105">
+          立即开始 →
+        </a>
+        <p class="mt-6 text-xs text-neutral-500">已有账号?打开应用会自动登录</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══ Footer ═══ -->
+<footer class="border-t border-white/5 py-12 px-6">
+  <div class="max-w-6xl mx-auto flex flex-col md:flex-row justify-between items-center gap-6">
+    <div class="flex items-center gap-2 text-sm text-neutral-500">
+      <span class="inline-block w-6 h-6 rounded-md bg-gradient-to-br from-brand-500 to-accent-500 flex items-center justify-center text-xs">🎭</span>
+      <span>© 2026 QVideoChat · Q 版虚拟形象随机匹配视频通话</span>
+    </div>
+    <div class="flex gap-6 text-sm text-neutral-500">
+      <a href="#" class="hover:text-white transition">隐私政策</a>
+      <a href="#" class="hover:text-white transition">服务条款</a>
+      <a href="mailto:contact@justsaysayforfun.com" class="hover:text-white transition">联系我们</a>
+    </div>
+  </div>
+</footer>
+
+</body>
+</html>

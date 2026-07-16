@@ -83,12 +83,28 @@ export function frameHeadClose(
   camera.updateProjectionMatrix();
 }
 
-export async function loadVRM(url: string): Promise<VRM> {
+export async function loadVRM(
+  url: string,
+  onProgress?: (received: number, total: number) => void,
+): Promise<VRM> {
   const loader = new GLTFLoader();
   loader.crossOrigin = "anonymous";
   loader.register((parser) => new VRMLoaderPlugin(parser));
 
-  const gltf = await loader.loadAsync(url);
+  // Wrap load() so we get the ProgressEvent, which loadAsync() swallows.
+  // total can be 0 when the server omits Content-Length (rare for our static
+  // .vrm files, but possible behind proxies) — callers handle that as an
+  // indeterminate state.
+  const gltf = await new Promise<any>((resolve, reject) => {
+    loader.load(
+      url,
+      (g) => resolve(g),
+      (event) => {
+        onProgress?.(event.loaded, event.total || 0);
+      },
+      (err) => reject(err),
+    );
+  });
   const vrm = gltf.userData.vrm as VRM;
 
   vrm.scene.traverse((obj) => {
@@ -240,6 +256,90 @@ export function applyUpperBody(
   chest.rotation.order = "YXZ";
   chest.rotation.y = chest.rotation.y + (yaw - chest.rotation.y) * smooth;
   chest.rotation.z = chest.rotation.z + (roll - chest.rotation.z) * smooth;
+}
+
+// --- Idle upper-body pose (arms rest + breath) ---
+//
+// The VRM ships in T-pose (arms straight out), which reads terribly for a
+// video-chat avatar. `applyIdleUpperBody` writes a natural arms-down rest
+// pose plus a slow sine-wave breath cycle on chest/shoulders/arms so the
+// figure looks alive even when the user is still. Purely procedural — no
+// tracker input required.
+//
+// COMPOSE NOTE: writes chest.rotation with a pure assignment, so it must
+// run AFTER `applyUpperBody` if pose tracking is re-enabled later, and the
+// two need to be reworked to compose (breath as an additive delta on top
+// of the pose-smoothed target). While `ENABLE_POSE=false` in useFaceMesh,
+// nothing else touches chest so pure write is safe and simpler.
+
+// Arms-down rest pose, in radians on the NORMALIZED humanoid rig (VRM 1.0
+// convention: T-pose at zero, palms forward). Rotating upper arm around Z
+// brings the arm from horizontal-out to vertical-down; lower arm Y adds a
+// slight inward elbow bend so the arm doesn't read as stiff/straight.
+const REST_UPPER_ARM_Z = 1.30;  // ~74° — arms hang down beside torso
+const REST_LOWER_ARM_Y = 0.18;  // slight inward elbow bend
+
+// Breath cycle. ~15 breaths/minute is a resting adult rate.
+const BREATH_PERIOD_MS = 4000;
+// Amplitudes are deliberately tiny — the goal is "alive" not "animated".
+const BREATH_CHEST_PITCH = 0.010;   // ~0.6° chest tilt back on inhale
+const BREATH_SHOULDER_LIFT = 0.020; // ~1.15° shoulder raise on inhale
+const BREATH_ARM_SWAY = 0.012;      // ~0.7° upper-arm sway with breath
+
+/**
+ * Apply an idle "resting + breathing" pose to arms/shoulders/chest each
+ * frame. Overwrites all touched bones — call once per animate tick, after
+ * `applyHeadRotation` and (if used) `applyUpperBody`.
+ *
+ * @param nowMs  `performance.now()` — drives the breath phase. Passed in
+ *               so callers can freeze/scrub time in tests if needed.
+ */
+export function applyIdleUpperBody(vrm: VRM, nowMs: number) {
+  const h = vrm.humanoid;
+  if (!h) return;
+
+  const phase = (nowMs % BREATH_PERIOD_MS) / BREATH_PERIOD_MS;
+  const s = Math.sin(phase * Math.PI * 2);
+
+  const luArm = h.getNormalizedBoneNode(VRMHumanBoneName.LeftUpperArm);
+  const ruArm = h.getNormalizedBoneNode(VRMHumanBoneName.RightUpperArm);
+  if (luArm) {
+    luArm.rotation.order = "YXZ";
+    luArm.rotation.set(0, 0, REST_UPPER_ARM_Z + s * BREATH_ARM_SWAY);
+  }
+  if (ruArm) {
+    ruArm.rotation.order = "YXZ";
+    ruArm.rotation.set(0, 0, -(REST_UPPER_ARM_Z + s * BREATH_ARM_SWAY));
+  }
+
+  const llArm = h.getNormalizedBoneNode(VRMHumanBoneName.LeftLowerArm);
+  const rlArm = h.getNormalizedBoneNode(VRMHumanBoneName.RightLowerArm);
+  if (llArm) {
+    llArm.rotation.order = "YXZ";
+    llArm.rotation.set(0, REST_LOWER_ARM_Y, 0);
+  }
+  if (rlArm) {
+    rlArm.rotation.order = "YXZ";
+    rlArm.rotation.set(0, -REST_LOWER_ARM_Y, 0);
+  }
+
+  const lSh = h.getNormalizedBoneNode(VRMHumanBoneName.LeftShoulder);
+  const rSh = h.getNormalizedBoneNode(VRMHumanBoneName.RightShoulder);
+  if (lSh) {
+    lSh.rotation.order = "YXZ";
+    lSh.rotation.z = -s * BREATH_SHOULDER_LIFT;
+  }
+  if (rSh) {
+    rSh.rotation.order = "YXZ";
+    rSh.rotation.z = s * BREATH_SHOULDER_LIFT;
+  }
+
+  const chest = h.getNormalizedBoneNode(VRMHumanBoneName.Chest)
+    ?? h.getNormalizedBoneNode(VRMHumanBoneName.Spine);
+  if (chest) {
+    chest.rotation.order = "YXZ";
+    chest.rotation.x = -s * BREATH_CHEST_PITCH;
+  }
 }
 
 export interface FramingTargets {

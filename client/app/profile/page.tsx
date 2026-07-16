@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import MatchButton from "@/components/MatchButton";
+import PendingInvitationsPanel from "@/components/PendingInvitationsPanel";
 import * as api from "@/lib/api";
 
 export default function ProfilePage() {
@@ -13,6 +14,7 @@ export default function ProfilePage() {
   const [loading, setLoading] = useState(true);
   const [needLogin, setNeedLogin] = useState(false);
   const [referral, setReferral] = useState<any>(null);
+  const [confirmLogout, setConfirmLogout] = useState(false);
 
   useEffect(() => {
     if (!api.isLoggedIn()) {
@@ -85,6 +87,8 @@ export default function ProfilePage() {
       </button>
 
       <h1 className="text-xl font-bold">我的</h1>
+
+      <PendingInvitationsPanel />
 
       {stats && (
         <div className="flex gap-6 rounded-xl bg-neutral-900 border border-neutral-800 px-8 py-5">
@@ -164,7 +168,67 @@ export default function ProfilePage() {
       </div>
 
       <hr className="w-64 border-neutral-800" />
+      <button
+        onClick={() => router.push("/avatars")}
+        className="w-full max-w-sm rounded-2xl bg-gradient-to-r from-purple-500/20 to-pink-500/20 border border-purple-500/30 hover:border-purple-500/60 transition px-5 py-4 flex items-center justify-between"
+      >
+        <span className="flex items-center gap-3">
+          <span className="text-2xl">🎭</span>
+          <span className="flex flex-col items-start">
+            <span className="text-sm font-medium text-neutral-100">我的化身</span>
+            <span className="text-[10px] text-neutral-400">试试即将上线的新装扮</span>
+          </span>
+        </span>
+        <span className="text-neutral-400">→</span>
+      </button>
+
       <MatchButton label="返回首页" variant="secondary" onClick={() => router.push("/")} />
+
+      {/* Logout — kept below the primary "back home" to reduce accidental
+          clicks. Confirmation modal so a stray tap can't wipe the session.
+          Logout clears the token + user object; useUser resolves to null on
+          next mount, which naturally puts the user in guest state. */}
+      <button
+        type="button"
+        onClick={() => setConfirmLogout(true)}
+        className="mt-8 text-xs text-red-500/80 hover:text-red-400 transition py-2 px-4"
+      >
+        退出登录
+      </button>
+
+      {confirmLogout && (
+        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center px-4" onClick={() => setConfirmLogout(false)}>
+          <div className="w-full max-w-sm rounded-3xl bg-neutral-900 border border-white/10 p-6 flex flex-col gap-4" onClick={(e) => e.stopPropagation()}>
+            <div className="text-center">
+              <div className="text-3xl mb-2">👋</div>
+              <h3 className="text-lg font-semibold">退出登录?</h3>
+              <p className="text-neutral-400 text-xs mt-2">下次可以用邮箱 / 手机号 / ID + 密码重新登录</p>
+            </div>
+            <div className="flex flex-col gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  try { localStorage.removeItem("token"); localStorage.removeItem("user"); } catch {}
+                  // Full page reload guarantees every hook + cached state is
+                  // dropped — safer than router.push after logout.
+                  const base = process.env.NEXT_PUBLIC_BASE_PATH || "";
+                  window.location.href = `${base}/`;
+                }}
+                className="w-full rounded-2xl bg-red-600 hover:bg-red-500 px-6 py-2.5 text-sm font-semibold text-white transition"
+              >
+                确认退出
+              </button>
+              <button
+                type="button"
+                onClick={() => setConfirmLogout(false)}
+                className="text-xs text-neutral-500 hover:text-neutral-300 py-2"
+              >
+                取消
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </main>
   );
 }

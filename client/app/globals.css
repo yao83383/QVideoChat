@@ -6,3 +6,20 @@ body {
   color: #f0f0f0;
   font-family: system-ui, -apple-system, sans-serif;
 }
+
+/* Emote float animation — spawned by FloatingEmoteLayer. Origin is the bottom
+ * of the viewport; --x offsets it horizontally around center. Ends completely
+ * transparent so React's setTimeout cleanup timing isn't critical. */
+@keyframes qv-float-up {
+  0%   { opacity: 0; transform: translate(calc(-50% + var(--qv-x, 0px)), 20px)   scale(0.6); }
+  10%  { opacity: 1; transform: translate(calc(-50% + var(--qv-x, 0px)), -40px)  scale(1.05); }
+  85%  { opacity: 1; transform: translate(calc(-50% + var(--qv-x, 0px)), -60vh)  scale(1.15); }
+  100% { opacity: 0; transform: translate(calc(-50% + var(--qv-x, 0px)), -75vh)  scale(1.25); }
+}
+
+/* Recap card slide-up. Base container is `left-1/2` so we keep the -50% X
+ * offset in both keyframes; only Y and opacity change. */
+@keyframes qv-slide-up {
+  from { opacity: 0; transform: translate(-50%, 24px); }
+  to   { opacity: 1; transform: translate(-50%, 0); }
+}

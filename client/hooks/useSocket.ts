@@ -29,7 +29,7 @@ export interface SignalEvents {
 export interface UseSocketReturn {
   isConnected: boolean;
   socketRef: React.MutableRefObject<Socket | null>;
-  joinMatch: (userId: string, username: string, tags?: string[]) => void;
+  joinMatch: (userId: string, username: string, tags?: string[], nativeLang?: string, targetLang?: string) => void;
   cancelMatch: (userId: string) => void;
   joinRoom: (roomId: string, userId: string) => void;
   sendOffer: (roomId: string, sdp: RTCSessionDescriptionInit) => void;
@@ -88,8 +88,13 @@ export function useSocket(
     };
   }, []);
 
-  const joinMatch = useCallback((userId: string, username: string, tags?: string[]) => {
-    socketRef.current?.emit("match:join", { userId, username, tags: tags ?? [] });
+  const joinMatch = useCallback((userId: string, username: string, tags?: string[], nativeLang?: string, targetLang?: string) => {
+    socketRef.current?.emit("match:join", {
+      userId, username,
+      tags: tags ?? [],
+      nativeLang: nativeLang ?? "",
+      targetLang: targetLang ?? "",
+    });
   }, []);
 
   const cancelMatch = useCallback((userId: string) => {

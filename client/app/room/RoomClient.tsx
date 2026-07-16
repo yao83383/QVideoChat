@@ -8,6 +8,12 @@ import VoiceStatus from "@/components/VoiceStatus";
 import LoginPrompt from "@/components/LoginPrompt";
 import TopicCard from "@/components/TopicCard";
 import LanguageSelector from "@/components/LanguageSelector";
+import EmoteBar from "@/components/EmoteBar";
+import FloatingEmoteLayer, { useFloatingEmotes, emojiForKey } from "@/components/FloatingEmoteLayer";
+import RecapCard, { type RecapState } from "@/components/RecapCard";
+import ReportModal, { REPORT_CATEGORIES, type ReportCategory } from "@/components/ReportModal";
+import { useSelectedAvatar } from "@/hooks/useSelectedAvatar";
+import { isBlocked, blockUser, bumpBlocklistHit } from "@/lib/blocklist";
 import { getSettings } from "@/components/SettingsModal";
 import { useFaceMesh } from "@/hooks/useFaceMesh";
 import { usePeer } from "@/hooks/usePeer";
@@ -56,6 +62,7 @@ export default function RoomClient() {
   const [friendStatus, setFriendStatus] = useState<"none" | "sent" | "received" | "friends">("none");
   const [showFriendPrompt, setShowFriendPrompt] = useState(false);
   const [reported, setReported] = useState(false);
+  const [showReport, setShowReport] = useState(false);
   const [showLoginModal, setShowLoginModal] = useState(false);
   const [topicText, setTopicText] = useState("");
   const [topicCategory, setTopicCategory] = useState("general");
@@ -78,6 +85,7 @@ export default function RoomClient() {
   });
 
   const { blendshapeRef, poseRef, isLoaded, isCameraOn, error: camError, step: camStep, faceFound, start, stop, toggleCamera } = useFaceMesh();
+  const { selectedEntry } = useSelectedAvatar();
   useEffect(() => { start(); return () => stop(); }, []);
   const cameraEverLoaded = useRef(false);
   useEffect(() => { if (isLoaded) cameraEverLoaded.current = true; }, [isLoaded]);
@@ -89,6 +97,13 @@ export default function RoomClient() {
   const handleMyConfigChange = useCallback((cfg: AvatarConfig) => {
     myAvatarConfigRef.current = cfg;
   }, []);
+
+  // Mirror the current selected VRM path into a ref so usePeer's fixed-rate
+  // send interval always reads the latest value without needing to re-run.
+  const myVrmPathRef = useRef<string | null>(null);
+  useEffect(() => {
+    myVrmPathRef.current = selectedEntry.vrmPath;
+  }, [selectedEntry.vrmPath]);
 
   const onOfferRef = useRef<(sdp: RTCSessionDescriptionInit) => void>(undefined);
   const onAnswerRef = useRef<(sdp: RTCSessionDescriptionInit) => void>(undefined);
@@ -176,7 +191,7 @@ export default function RoomClient() {
     onIceCandidate: (candidate: RTCIceCandidateInit) => { socket.sendIce(roomId, candidate); },
   }), [socket.sendOffer, socket.sendAnswer, socket.sendIce, roomId]);
 
-  const peer = usePeer(blendshapeRef, signaling, poseRef, myAvatarConfigRef);
+  const peer = usePeer(blendshapeRef, signaling, poseRef, myAvatarConfigRef, myVrmPathRef);
 
   useEffect(() => {
     onOfferRef.current = peer.handleIncomingOffer;
@@ -228,8 +243,8 @@ export default function RoomClient() {
       if (!Array.isArray(tags)) tags = [];
     } catch { /* ignore */ }
     setSearching(true);
-    socket.joinMatch(userId, uname, tags);
-  }, [socket.isConnected, socket.joinMatch, roomId, userId, uname, router]);
+    socket.joinMatch(userId, uname, tags, sourceLang, targetLang);
+  }, [socket.isConnected, socket.joinMatch, roomId, userId, uname, router, sourceLang, targetLang]);
 
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
@@ -485,6 +500,84 @@ export default function RoomClient() {
     });
   }, [subtitleEnabled, peer.onRemoteTranslation]);
 
+  // --- Emote ---
+  //
+  // FloatingEmoteLayer owns the DOM overlay + auto-cleanup of expired emotes;
+  // this hook exposes the list + a spawn fn. We subscribe to remote emotes so
+  // the peer's tap appears on our screen too. Send/receive counters go to
+  // localStorage as a foundation for future "热门 emoji" analytics — a real
+  // upload path can pick them up later.
+  const { emotes, spawn: spawnEmote } = useFloatingEmotes();
+
+  useEffect(() => {
+    return peer.onRemoteEmote((key) => {
+      spawnEmote(emojiForKey(key));
+      try {
+        const storageKey = `qv_emote_recv_${key}`;
+        const n = parseInt(localStorage.getItem(storageKey) || "0", 10) + 1;
+        localStorage.setItem(storageKey, String(n));
+      } catch { /* ignore */ }
+    });
+  }, [peer.onRemoteEmote, spawnEmote]);
+
+  const handleEmoteSend = (key: string) => {
+    spawnEmote(emojiForKey(key));
+    peer.sendEmote(key);
+    try {
+      const storageKey = `qv_emote_sent_${key}`;
+      const n = parseInt(localStorage.getItem(storageKey) || "0", 10) + 1;
+      localStorage.setItem(storageKey, String(n));
+    } catch { /* ignore */ }
+  };
+
+  // --- Recap card ---
+  //
+  // Snapshots the partner + friend state at the moment the user taps 下一个 so
+  // the card can outlive the state reset that immediately follows. Rating and
+  // add-friend actions from the card write local counters; those are the
+  // foundation for a future "recommendation" pass and for judging whether
+  // 下一个 without rating is common (i.e. is the card in the way?).
+  const [recap, setRecap] = useState<RecapState | null>(null);
+
+  const handleRecapRate = (score: 1 | 2 | 3) => {
+    try {
+      const key = `qv_rating_${score}`;
+      const n = parseInt(localStorage.getItem(key) || "0", 10) + 1;
+      localStorage.setItem(key, String(n));
+    } catch { /* ignore */ }
+    setRecap(null);
+  };
+
+  const handleRecapAddFriend = () => {
+    if (!recap) return;
+    if (!isRegistered) { setShowLoginModal(true); return; }
+    socket.sendFriendRequest(userId, uname, recap.puid);
+    setRecap({ ...recap, addFriendSent: true });
+    try {
+      const key = "qv_addfriend_from_recap";
+      const n = parseInt(localStorage.getItem(key) || "0", 10) + 1;
+      localStorage.setItem(key, String(n));
+    } catch { /* ignore */ }
+  };
+
+  const handleRecapAcceptFriend = () => {
+    if (!recap) return;
+    if (!isRegistered) { setShowLoginModal(true); return; }
+    socket.sendFriendAccept(recap.puid, userId);
+    setRecap({ ...recap, friendAccepted: true });
+  };
+
+  const handleRecapDismiss = () => {
+    // Auto-dismiss without a rating counts as "skipped" — tracked so we can
+    // decide later if the card is intrusive vs useful.
+    try {
+      const key = "qv_rating_skipped";
+      const n = parseInt(localStorage.getItem(key) || "0", 10) + 1;
+      localStorage.setItem(key, String(n));
+    } catch { /* ignore */ }
+    setRecap(null);
+  };
+
   // --- Handlers ---
 
   const handleSourceLangChange = (lang: string) => { setSourceLang(lang); savePref("qv_sl", lang); };
@@ -499,6 +592,18 @@ export default function RoomClient() {
   };
 
   const handleNext = () => {
+    // Snapshot the current partner + friend state so the recap card can render
+    // it even after the state reset below. Only meaningful when we actually
+    // had a partner — skip for the "no match yet" case.
+    if (puid && pname) {
+      setRecap({
+        puid,
+        pname,
+        friendStatus,
+        addFriendSent: false,
+        friendAccepted: false,
+      });
+    }
     // Leave current room, wipe partner state, and queue up for a new match
     // WITHOUT navigating away. The onFound handler in matchEvents will fill
     // the partner slot back in once the server matches us.
@@ -519,7 +624,7 @@ export default function RoomClient() {
       tags = JSON.parse(localStorage.getItem("qv_pendingTags") || "[]");
       if (!Array.isArray(tags)) tags = [];
     } catch { /* ignore */ }
-    socket.joinMatch(userId, uname, tags);
+    socket.joinMatch(userId, uname, tags, sourceLang, targetLang);
   };
 
   const handleAddFriend = () => {
@@ -534,13 +639,62 @@ export default function RoomClient() {
     setFriendStatus("friends");
   };
 
-  if (!isLoaded && !cameraEverLoaded.current) {
+  // Categorized report submit. Piggybacks the existing reportUser API — the
+  // server just gets a labeled string in the reason slot now — and auto-adds
+  // the partner to the local blocklist so the next-match handler skips them.
+  const handleReportSubmit = (categoryKey: ReportCategory, freeText: string) => {
+    const label = REPORT_CATEGORIES.find((c) => c.key === categoryKey)?.label ?? categoryKey;
+    const reason = categoryKey === "other" ? `${label}: ${freeText}` : label;
+    reportUser(puid, roomId, reason);
+    if (puid) blockUser(puid);
+    setReported(true);
+    setShowReport(false);
+    try {
+      const k = `qv_report_${categoryKey}`;
+      localStorage.setItem(k, String(parseInt(localStorage.getItem(k) || "0", 10) + 1));
+    } catch { /* ignore */ }
+  };
+
+  // Auto-skip blocked partners. Fires whenever a new partner id lands
+  // (via match:found → setPuid). If the id is on our local block list we
+  // synthesise the same reset+requeue handleNext would do, without ever
+  // showing the partner's avatar or waking the WebRTC handshake.
+  useEffect(() => {
+    if (!puid) return;
+    if (!isBlocked(puid)) return;
+    bumpBlocklistHit();
+    if (roomId) socket.leaveRoom(roomId);
+    peer.disconnect();
+    setRoomId("");
+    setPuid("");
+    setPname("对方");
+    setPartnerLeft(false);
+    setPartnerReconnecting(false);
+    setRoomReady(false);
+    setFriendStatus("none");
+    setShowFriendPrompt(false);
+    setTopicText("");
+    setSearching(true);
+    let tags: string[] = [];
+    try {
+      tags = JSON.parse(localStorage.getItem("qv_pendingTags") || "[]");
+      if (!Array.isArray(tags)) tags = [];
+    } catch { /* ignore */ }
+    socket.joinMatch(userId, uname, tags, sourceLang, targetLang);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [puid]);
+
+  // Camera-init gate: only spin here while the tracker is genuinely working.
+  // Denying camera used to leave users stuck on this spinner forever because
+  // useFaceMesh sets error but never flips isLoaded — after wiring the "match
+  // without camera" flow (v1.3.0.017), a camError explicitly falls through to
+  // the main room render so a camera-less user can still talk over voice.
+  if (!isLoaded && !cameraEverLoaded.current && !camError) {
     return (
       <main className="flex min-h-screen flex-col items-center justify-center gap-4">
         <div className="h-8 w-8 animate-spin rounded-full border-2 border-neutral-600 border-t-white" />
         <p className="text-neutral-400 text-sm">初始化摄像头...</p>
         {camStep && <p className="text-yellow-400 text-xs">阶段: {camStep}</p>}
-        {camError && <p className="text-red-400 text-sm">{camError}</p>}
       </main>
     );
   }
@@ -589,6 +743,9 @@ export default function RoomClient() {
               blendshapeRef={blendshapeRef}
               poseRef={poseRef}
               size={260}
+              vrmPath={selectedEntry.vrmPath}
+              placeholderEmoji={selectedEntry.emoji}
+              placeholderTint={selectedEntry.tint}
               mirror
               onConfigChange={handleMyConfigChange}
             />
@@ -712,6 +869,7 @@ export default function RoomClient() {
               blendshapeRef={peer.remoteBlendshapeRef}
               poseRef={peer.remotePoseRef}
               externalConfigRef={peer.remoteAvatarConfigRef}
+              vrmPath={peer.remoteVrmPath ?? undefined}
               size={260}
               muted={partnerLeft}
             />
@@ -758,24 +916,42 @@ export default function RoomClient() {
         )}
       </div>
 
-      {cameraEverLoaded.current && (
-        <div className="flex gap-2">
-          <button
-            onClick={toggleCamera}
-            className={`w-9 h-9 rounded-full flex items-center justify-center text-sm transition ${
-              isCameraOn ? "bg-neutral-800 border border-neutral-600 text-neutral-300 hover:bg-neutral-700" : "bg-red-600/30 border border-red-700 text-red-400"
-            }`}>
-            📷
-          </button>
-          <button
-            onClick={peer.toggleMic}
-            className={`w-9 h-9 rounded-full flex items-center justify-center text-sm transition ${
-              peer.isMicOn ? "bg-neutral-800 border border-neutral-600 text-neutral-300 hover:bg-neutral-700" : "bg-red-600/30 border border-red-700 text-red-400"
-            }`}>
-            🎙
-          </button>
-        </div>
-      )}
+      {/* Media control row. Rendered unconditionally now (was gated on
+          cameraEverLoaded.current before) — a user who denied camera would
+          previously never see the buttons and had no way to retry the grant. */}
+      <div className="flex gap-2">
+        <button
+          onClick={toggleCamera}
+          title={camError ? "未授权,点击尝试授权" : isCameraOn ? "关闭摄像头" : "打开摄像头"}
+          className={`relative w-9 h-9 rounded-full flex items-center justify-center text-sm transition ${
+            isCameraOn
+              ? "bg-neutral-800 border border-neutral-600 text-neutral-300 hover:bg-neutral-700"
+              : camError
+              ? "bg-red-950/60 border-2 border-red-600 text-red-400/70 hover:bg-red-900/70"
+              : "bg-red-600/30 border border-red-700 text-red-400"
+          }`}>
+          <span aria-hidden>📷</span>
+          {/* Red slash overlay marks "explicitly denied / errored" — visually
+              distinct from a plain off state so users understand the button
+              can retry the browser permission grant. */}
+          {!isCameraOn && camError && (
+            <span
+              className="absolute inset-0 flex items-center justify-center text-base font-bold text-red-500 pointer-events-none"
+              aria-hidden
+            >
+              ✕
+            </span>
+          )}
+        </button>
+        <button
+          onClick={peer.toggleMic}
+          title={peer.isMicOn ? "静音" : "取消静音"}
+          className={`w-9 h-9 rounded-full flex items-center justify-center text-sm transition ${
+            peer.isMicOn ? "bg-neutral-800 border border-neutral-600 text-neutral-300 hover:bg-neutral-700" : "bg-red-600/30 border border-red-700 text-red-400"
+          }`}>
+          🎙
+        </button>
+      </div>
 
       <div className="flex items-center gap-3 flex-wrap justify-center">
         {peer.isConnected && (
@@ -829,6 +1005,12 @@ export default function RoomClient() {
         </div>
       )}
 
+      {/* Emote bar: reactions during an active call. Sits above the primary
+          action row so a stray tap can't accidentally hit "下一个". */}
+      {peer.isConnected && (
+        <EmoteBar onSend={handleEmoteSend} />
+      )}
+
       <div className="flex gap-4 mt-2">
         <button onClick={handleHangup}
           className="rounded-lg bg-neutral-800 border border-neutral-700 px-4 py-2 text-sm text-neutral-300 hover:border-red-600 hover:text-red-400 transition">
@@ -839,15 +1021,41 @@ export default function RoomClient() {
           {searching ? "寻找中..." : "下一个"}
         </button>
         {!reported && (
-          <button onClick={() => { reportUser(puid, roomId, ""); setReported(true); }}
-            className="text-[10px] text-red-600 hover:text-red-400 underline underline-offset-2">
-            举报
+          <button
+            type="button"
+            onClick={() => setShowReport(true)}
+            title="举报当前对方"
+            className="flex items-center gap-1.5 rounded-lg bg-red-950/40 border border-red-800/60 hover:bg-red-900/50 hover:border-red-600 text-red-300 hover:text-red-100 px-3 py-2 text-xs font-medium transition"
+          >
+            <span>🚨</span>
+            <span>举报</span>
           </button>
         )}
-        {reported && <span className="text-[10px] text-neutral-600">已举报</span>}
+        {reported && (
+          <span className="rounded-lg bg-neutral-800/70 border border-neutral-700 px-3 py-2 text-xs text-neutral-500">
+            已举报,已加入黑名单
+          </span>
+        )}
       </div>
 
       <LoginPrompt show={showLoginModal} onClose={() => setShowLoginModal(false)} />
+      <FloatingEmoteLayer emotes={emotes} />
+      {recap && (
+        <RecapCard
+          recap={recap}
+          onRate={handleRecapRate}
+          onAddFriend={handleRecapAddFriend}
+          onAcceptFriend={handleRecapAcceptFriend}
+          onDismiss={handleRecapDismiss}
+        />
+      )}
+      {showReport && (
+        <ReportModal
+          partnerName={pname || "对方"}
+          onSubmit={handleReportSubmit}
+          onDismiss={() => setShowReport(false)}
+        />
+      )}
     </main>
   );
 }

@@ -19,6 +19,15 @@ client/public/models/*.task
 client/public/models/onnx/
 client/public/onnx-wasm/
 client/public/sherpa-asr/
+# VRM avatars — 145MB+ per set. Delivered to servers via deploy tarball
+# (tar of client/public), not committed. See memory:vrm-file-layout for
+# how to add new ones locally and register them in client/lib/avatars.ts.
+client/public/models/female/
+client/public/models/male/
+client/public/models/unisex/
+
+# TypeScript incremental build cache
+client/tsconfig.tsbuildinfo
 
 # Next.js static export
 client/out/
