@@ -65,11 +65,26 @@ function PetView() {
     router.replace(`/pet?target=${next}`);
   };
 
-  // Slice B–D use window.close() which the Electron BrowserWindow interprets
-  // as "hide" via the close handler (main.js). In a plain browser tab it just
-  // closes the tab — acceptable dev-mode behavior.
+  // Main process may push `qv:pet:target` when the same pet window is
+  // reopened with a different mode (e.g. tray menu switches to partner).
+  // Sync the URL so React re-renders the right branch. No-op in browser.
+  useEffect(() => {
+    if (typeof window === "undefined" || !window.qvHost) return;
+    return window.qvHost.onPetTargetChange((next) => {
+      router.replace(`/pet?target=${next}`);
+    });
+  }, [router]);
+
+  // Close routes through the Electron shell so we hide (cheap to bring
+  // back — MediaPipe + VRM already loaded) instead of destroying the window.
+  // Falls back to a plain window.close() in a normal browser tab so dev
+  // sessions still behave predictably.
   const closePet = () => {
-    try { window.close(); } catch { /* ignore */ }
+    if (typeof window !== "undefined" && window.qvHost) {
+      window.qvHost.hidePet().catch(() => { /* ignore */ });
+    } else {
+      try { window.close(); } catch { /* ignore */ }
+    }
   };
 
   return (

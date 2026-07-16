@@ -7,11 +7,23 @@
  * used directly because the exported HTML references `/foo` which would
  * resolve to filesystem root, not the app bundle.
  *
- * The pet window (transparent, always-on-top) lives in electron/pet-window.js
- * and is opened from the tray menu — slice D.
+ * Windows:
+ *   - main window: full app UX at app://qvideochat/
+ *   - pet window: single-avatar desktop pet at app://qvideochat/pet/?target=…
+ *     transparent + frameless + always-on-top, opened via IPC or a global
+ *     Ctrl+Shift+P shortcut (dev toggle until slice E adds the tray icon).
  */
 
-const { app, BrowserWindow, protocol, session, net } = require("electron");
+const {
+  app,
+  BrowserWindow,
+  protocol,
+  session,
+  net,
+  ipcMain,
+  globalShortcut,
+  screen,
+} = require("electron");
 const path = require("node:path");
 const { pathToFileURL } = require("node:url");
 
@@ -36,12 +48,15 @@ protocol.registerSchemesAsPrivileged([
 // will copy both under resources/app/ so the same relative path holds.
 const OUT_DIR = path.join(__dirname, "..", "out");
 
-/**
- * Wire the `app://` protocol handler. Any URL is resolved as a file inside
- * OUT_DIR; a bare `/` maps to `index.html` so app://qvideochat/ works.
- * Directory URLs (trailing slash) also map to the nested index.html —
- * needed because we compiled with trailingSlash: true (see next.config.ts).
- */
+// Tracked so IPC handlers can hand back the same window on repeated
+// pet:open calls, and so `app.on('before-quit')` can distinguish
+// intentional shutdowns from user-hiding a window.
+/** @type {BrowserWindow | null} */
+let mainWindow = null;
+/** @type {BrowserWindow | null} */
+let petWindow = null;
+let isQuittingApp = false;
+
 function registerAppProtocol() {
   protocol.handle("app", async (request) => {
     const url = new URL(request.url);
@@ -106,7 +121,6 @@ function autoGrantMediaPermissions() {
   session.defaultSession.setPermissionCheckHandler(
     (_webContents, permission) => ALLOWED.has(permission),
   );
-  // Newer Chromium API used by getDisplayMedia and some getUserMedia paths.
   if (session.defaultSession.setDisplayMediaRequestHandler) {
     session.defaultSession.setDisplayMediaRequestHandler((_req, cb) => cb({}));
   }
@@ -131,18 +145,160 @@ function createMainWindow() {
 
   win.once("ready-to-show", () => win.show());
   win.loadURL("app://qvideochat/");
+
+  // On close: really close the main window. If the pet is still up it stays
+  // as a lightweight "presence" until the user quits from its tray/menu
+  // (slice E) — desktop pet apps commonly outlive the launching UI.
+  win.on("closed", () => {
+    mainWindow = null;
+  });
+
+  mainWindow = win;
   return win;
+}
+
+/**
+ * Create (or reveal) the pet window. Idempotent: repeated calls just
+ * `show()` + `focus()` the existing window instead of stacking a second
+ * transparent overlay.
+ *
+ * Positioning: bottom-right of the primary display's work area (respects
+ * taskbar height on Windows / dock on macOS). No user-relocatable memory
+ * yet — that lands with the tray in slice E.
+ *
+ * @param {"self" | "partner"} target
+ */
+function openPetWindow(target = "self") {
+  if (petWindow && !petWindow.isDestroyed()) {
+    petWindow.show();
+    petWindow.focus();
+    petWindow.webContents.send("qv:pet:target", target);
+    return petWindow;
+  }
+
+  const WIDTH = 320;
+  const HEIGHT = 400;
+  const MARGIN = 20;
+  const { workArea } = screen.getPrimaryDisplay();
+  const x = workArea.x + workArea.width - WIDTH - MARGIN;
+  const y = workArea.y + workArea.height - HEIGHT - MARGIN;
+
+  const win = new BrowserWindow({
+    width: WIDTH,
+    height: HEIGHT,
+    x,
+    y,
+    transparent: true,
+    frame: false,
+    resizable: false,
+    hasShadow: false,
+    skipTaskbar: true,
+    focusable: true,
+    // `screen-saver` puts the pet above full-screen apps too. Some users
+    // find this too aggressive — slice E's settings will expose a toggle.
+    alwaysOnTop: true,
+    show: false,
+    // Prevent white flash on load; the pet page will make body transparent
+    // once React mounts, but until then this keeps the frameless rect from
+    // painting white/black over the desktop wallpaper.
+    backgroundColor: "#00000000",
+    webPreferences: {
+      preload: path.join(__dirname, "preload.js"),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: false,
+    },
+  });
+
+  win.setAlwaysOnTop(true, "screen-saver");
+  win.once("ready-to-show", () => win.show());
+  win.loadURL(`app://qvideochat/pet/?target=${encodeURIComponent(target)}`);
+
+  // Close button in the pet HUD calls `window.close()` — intercept and hide
+  // instead so the user can toggle the pet back on without a full reload of
+  // MediaPipe + VRM (~30MB of one-time cost).
+  win.on("close", (e) => {
+    if (!isQuittingApp) {
+      e.preventDefault();
+      win.hide();
+    }
+  });
+
+  win.on("closed", () => {
+    petWindow = null;
+  });
+
+  petWindow = win;
+  return win;
+}
+
+/** IPC contract exposed via preload.js → window.qvHost.* */
+function registerIpc() {
+  ipcMain.handle("qv:pet:open", (_e, target) => {
+    openPetWindow(target === "partner" ? "partner" : "self");
+    return true;
+  });
+
+  ipcMain.handle("qv:pet:hide", () => {
+    if (petWindow && !petWindow.isDestroyed()) petWindow.hide();
+    return true;
+  });
+
+  ipcMain.handle("qv:pet:toggle", (_e, target) => {
+    if (petWindow && !petWindow.isDestroyed() && petWindow.isVisible()) {
+      petWindow.hide();
+    } else {
+      openPetWindow(target === "partner" ? "partner" : "self");
+    }
+    return true;
+  });
+
+  ipcMain.handle("qv:main:show", () => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.show();
+      mainWindow.focus();
+    } else {
+      createMainWindow();
+    }
+    return true;
+  });
+}
+
+/**
+ * Global dev-toggle: Ctrl+Shift+P anywhere on the OS opens or hides the pet
+ * window. Slice E adds a tray icon + main-window button as the "real" UX;
+ * this shortcut stays as a power-user affordance.
+ */
+function registerGlobalShortcuts() {
+  const ok = globalShortcut.register("CommandOrControl+Shift+P", () => {
+    if (petWindow && !petWindow.isDestroyed() && petWindow.isVisible()) {
+      petWindow.hide();
+    } else {
+      openPetWindow("self");
+    }
+  });
+  if (!ok) console.warn("[shortcut] failed to register Ctrl+Shift+P");
 }
 
 app.whenReady().then(() => {
   registerAppProtocol();
   injectCoopCoep();
   autoGrantMediaPermissions();
+  registerIpc();
+  registerGlobalShortcuts();
   createMainWindow();
 
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) createMainWindow();
   });
+});
+
+app.on("before-quit", () => {
+  isQuittingApp = true;
+});
+
+app.on("will-quit", () => {
+  globalShortcut.unregisterAll();
 });
 
 app.on("window-all-closed", () => {
