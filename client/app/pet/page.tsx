@@ -1,10 +1,10 @@
 "use client";
 
-import { Suspense, useEffect } from "react";
+import { Suspense, useEffect, useRef, useState } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import VrmAvatar from "@/components/VrmAvatar";
-import { useFaceMesh } from "@/hooks/useFaceMesh";
 import { useSelectedAvatar } from "@/hooks/useSelectedAvatar";
+import type { BlendshapeFrame, PoseFrame } from "@/hooks/useFaceMesh";
 
 /**
  * /pet — desktop-pet content layer.
@@ -13,15 +13,24 @@ import { useSelectedAvatar } from "@/hooks/useSelectedAvatar";
  * frameless — see electron/main.js in slice D). Deliberately empty framing:
  * just a small drag strip up top and one big VrmAvatar in the middle.
  *
- * `?target=self` (default) drives the avatar from the local camera via
- * useFaceMesh, mirroring the user like a small desktop mirror.
- * `?target=partner` will subscribe to a peer's blendshape stream — that
- * needs socket + WebRTC plumbing and lands in slice E; for now it shows a
- * placeholder so the switch button already works end-to-end.
+ * **Self mode does NOT run its own face tracker.** A second MediaPipe
+ * FaceLandmarker in the pet window OOMs the wasm memory (both windows
+ * share the same-origin renderer process; 32-bit wasm caps around ~2GB
+ * per instance and two won't fit). The main window is the sole camera
+ * consumer and pushes blendshape/pose frames over IPC via window.qvHost.
+ * The pet subscribes and hands the refs straight to VrmAvatar — same
+ * shape useFaceMesh would have produced.
  *
- * Body background gets forced transparent via a `pet-body` class effect so
- * the surrounding BrowserWindow's transparency actually shows through. In
- * a normal browser tab you'll see the dark app background instead — that's
+ * Consequence: if the main window is closed or the camera is off, the pet
+ * shows the avatar's idle rest pose (VrmAvatar's built-in breathing loop).
+ * That's an acceptable "still-there but not driven" state.
+ *
+ * `?target=partner` will subscribe to the peer's blendshape stream instead
+ * — needs socket + WebRTC plumbing and lands in slice E.
+ *
+ * Body background gets forced transparent via a `pet-body` class so the
+ * surrounding BrowserWindow's transparency actually shows through. In a
+ * normal browser tab you'll see the dark app background instead — that's
  * fine for dev debugging.
  */
 
@@ -31,18 +40,18 @@ function PetView() {
   const sp = useSearchParams();
   const router = useRouter();
   const target = ((sp.get("target") as Target) || "self") as Target;
-
-  const { blendshapeRef, poseRef, start, stop, faceFound, error, isLoaded, step } =
-    useFaceMesh();
   const { selectedEntry } = useSelectedAvatar();
 
-  // Camera auto-start only when we're rendering our own face. Cleanup on
-  // unmount OR when the user flips to partner mode.
-  useEffect(() => {
-    if (target !== "self") return;
-    start();
-    return () => stop();
-  }, [target, start, stop]);
+  // Refs that VrmAvatar reads each render — same contract as useFaceMesh.
+  // Populated by IPC pushes from the main window (self) or peer stream (partner,
+  // slice E). Never null once we start receiving frames; VrmAvatar tolerates
+  // null and falls through to idle animation.
+  const blendshapeRef = useRef<BlendshapeFrame | null>(null);
+  const poseRef = useRef<PoseFrame | null>(null);
+
+  // "connected" = at least one frame arrived since mount. Used only for the
+  // quiet bottom status line; VrmAvatar itself doesn't need this flag.
+  const [connected, setConnected] = useState(false);
 
   // Force body / html transparent so the OS-level compositing behind the
   // BrowserWindow (desktop wallpaper) shows through the transparent regions.
@@ -60,25 +69,49 @@ function PetView() {
     };
   }, []);
 
+  // Self-mode blendshape/pose subscription. No-op when host missing (plain
+  // browser dev) or when target flips to partner. Cleanup detaches both
+  // ipcRenderer listeners so a partner→self→partner flip won't leak them.
+  useEffect(() => {
+    if (target !== "self") return;
+    if (typeof window === "undefined" || !window.qvHost) return;
+    const unsubB = window.qvHost.onBlendshape((frame) => {
+      blendshapeRef.current = frame;
+      if (!connected) setConnected(true);
+    });
+    const unsubP = window.qvHost.onPose((frame) => {
+      poseRef.current = frame;
+    });
+    return () => {
+      unsubB();
+      unsubP();
+    };
+    // `connected` intentionally omitted — we want the setState only on the
+    // FIRST frame; re-subscribing on every state change would drop frames.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [target]);
+
   const switchTarget = () => {
     const next: Target = target === "self" ? "partner" : "self";
     router.replace(`/pet?target=${next}`);
+    setConnected(false);
   };
 
   // Main process may push `qv:pet:target` when the same pet window is
   // reopened with a different mode (e.g. tray menu switches to partner).
-  // Sync the URL so React re-renders the right branch. No-op in browser.
+  // Sync the URL so React re-renders the right branch.
   useEffect(() => {
     if (typeof window === "undefined" || !window.qvHost) return;
     return window.qvHost.onPetTargetChange((next) => {
       router.replace(`/pet?target=${next}`);
+      setConnected(false);
     });
   }, [router]);
 
   // Close routes through the Electron shell so we hide (cheap to bring
-  // back — MediaPipe + VRM already loaded) instead of destroying the window.
-  // Falls back to a plain window.close() in a normal browser tab so dev
-  // sessions still behave predictably.
+  // back — VRM already loaded) instead of destroying the window. Falls back
+  // to a plain window.close() in a normal browser tab so dev sessions still
+  // behave predictably.
   const closePet = () => {
     if (typeof window !== "undefined" && window.qvHost) {
       window.qvHost.hidePet().catch(() => { /* ignore */ });
@@ -86,6 +119,8 @@ function PetView() {
       try { window.close(); } catch { /* ignore */ }
     }
   };
+
+  const hasHost = typeof window !== "undefined" && !!window.qvHost;
 
   return (
     <main className="min-h-screen w-screen flex flex-col bg-transparent">
@@ -131,11 +166,15 @@ function PetView() {
       </div>
 
       {/* Bottom-edge status text. Kept ultra-quiet so the pet reads as
-          decoration when everything's fine. Only surfaces problems. */}
+          decoration when everything's fine. Only surfaces the cases the
+          user might act on. */}
       <div className="qv-no-drag min-h-[16px] flex items-center justify-center text-[10px] text-white/50 select-none pb-1">
-        {target === "self" && error && <span className="text-red-400">{error}</span>}
-        {target === "self" && !error && step && !isLoaded && `加载: ${step}`}
-        {target === "self" && !error && isLoaded && !faceFound && "未检测到人脸"}
+        {target === "self" && !hasHost && (
+          <span className="text-yellow-500/70">仅 Electron 支持追踪</span>
+        )}
+        {target === "self" && hasHost && !connected && (
+          <span>等待主窗口打开摄像头…</span>
+        )}
       </div>
     </main>
   );

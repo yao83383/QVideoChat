@@ -30,6 +30,37 @@ contextBridge.exposeInMainWorld("qvHost", {
     ipcRenderer.on("qv:pet:target", handler);
     return () => ipcRenderer.removeListener("qv:pet:target", handler);
   },
+
+  // --- Blendshape bridge ------------------------------------------------
+  //
+  // The main window is the *only* place that runs MediaPipe. A second
+  // FaceLandmarker in the pet window OOMs the WASM memory (32-bit wasm
+  // caps around ~2GB per instance and the two share the renderer process's
+  // v8 heap on same-origin BrowserWindows). Instead, the main window pushes
+  // 30fps blendshape/pose frames over IPC and the pet subscribes.
+  //
+  // ipcRenderer.send is fire-and-forget for hot paths — no promise round-
+  // trip, no ack — because ~30fps × 2KB payloads add up otherwise.
+
+  /** Main window → main process → pet window. Silent no-op if no pet. */
+  pushBlendshape: (frame) => ipcRenderer.send("qv:blendshape:push", frame),
+  /**
+   * Pet window subscription.
+   * @param {(frame: import("../hooks/useFaceMesh").BlendshapeFrame) => void} cb
+   */
+  onBlendshape: (cb) => {
+    const handler = (_e, frame) => cb(frame);
+    ipcRenderer.on("qv:blendshape", handler);
+    return () => ipcRenderer.removeListener("qv:blendshape", handler);
+  },
+  /** Same shape as blendshape, separate channel for the pose stream. */
+  pushPose: (frame) => ipcRenderer.send("qv:pose:push", frame),
+  onPose: (cb) => {
+    const handler = (_e, frame) => cb(frame);
+    ipcRenderer.on("qv:pose", handler);
+    return () => ipcRenderer.removeListener("qv:pose", handler);
+  },
+
   /** True when running inside the Electron shell (window.qvHost exists). */
   isDesktop: true,
 });

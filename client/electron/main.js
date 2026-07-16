@@ -262,6 +262,31 @@ function registerIpc() {
     }
     return true;
   });
+
+  // Blendshape / pose forward channel. Renderer → main → pet. `.send` is
+  // fire-and-forget so the ~30fps hot path stays cheap; we drop silently
+  // if pet isn't up or is hidden (nothing to render behind hidden window).
+  ipcMain.on("qv:blendshape:push", (_e, frame) => {
+    if (
+      petWindow &&
+      !petWindow.isDestroyed() &&
+      petWindow.isVisible() &&
+      !petWindow.webContents.isCrashed()
+    ) {
+      petWindow.webContents.send("qv:blendshape", frame);
+    }
+  });
+
+  ipcMain.on("qv:pose:push", (_e, frame) => {
+    if (
+      petWindow &&
+      !petWindow.isDestroyed() &&
+      petWindow.isVisible() &&
+      !petWindow.webContents.isCrashed()
+    ) {
+      petWindow.webContents.send("qv:pose", frame);
+    }
+  });
 }
 
 /**

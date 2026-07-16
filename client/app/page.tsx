@@ -186,6 +186,23 @@ export default function Home() {
     }
   }, [start]);
 
+  // Bridge blendshape / pose frames to the Electron pet window at ~30fps.
+  // The pet renderer can't run its own MediaPipe (would OOM the wasm memory
+  // shared across same-origin BrowserWindows), so the main window is the
+  // single source of truth and pushes frames through window.qvHost.
+  // Fire-and-forget IPC; drops silently when no pet is open.
+  useEffect(() => {
+    if (typeof window === "undefined" || !window.qvHost) return;
+    const host = window.qvHost;
+    const iv = setInterval(() => {
+      const bs = blendshapeRef.current;
+      if (bs) host.pushBlendshape(bs);
+      const ps = poseRef.current;
+      if (ps) host.pushPose(ps);
+    }, 33);
+    return () => clearInterval(iv);
+  }, [blendshapeRef, poseRef]);
+
   // Warm up the ASR + translation pipelines from the home page so they're
   // ready by the time the user finishes matching. Two rules learned the hard
   // way in v1.2.2.007:
