@@ -32,6 +32,27 @@ const {
 const path = require("node:path");
 const { pathToFileURL } = require("node:url");
 
+// Single-instance lock. If the user double-clicks the exe while an instance
+// is already running (portable exe + tray-hidden main window makes this a
+// very easy mistake), the second launch should reveal the existing window
+// instead of starting a second Electron process. Must fire BEFORE
+// app.whenReady() so the second process quits fast, before it spins up
+// MediaPipe / VRM / anything expensive.
+const gotSingleInstanceLock = app.requestSingleInstanceLock();
+if (!gotSingleInstanceLock) {
+  app.quit();
+  process.exit(0);
+}
+
+app.on("second-instance", () => {
+  // Fires in the FIRST process when a second launch is attempted. Bring the
+  // main window back — covers three states:
+  //   - main window destroyed → revealMainWindow() rebuilds it
+  //   - main window hidden to tray → un-skip taskbar + show + focus
+  //   - main window already visible → just focus (windows steals focus for us)
+  revealMainWindow();
+});
+
 // Register `app://` as privileged BEFORE app.whenReady so the loaded pages
 // count as a secure origin and `crossOriginIsolated` (needed by sherpa-onnx
 // WASM's pthread support) can succeed once COOP/COEP headers land.
