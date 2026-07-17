@@ -357,7 +357,7 @@ export default function Home() {
       {/* Compact brand */}
       <div className="flex flex-col items-center gap-1 mt-2">
         <h1 className="text-2xl font-bold tracking-tight">QVideoChat</h1>
-        <p className="text-neutral-500 text-[11px]">原创角色 · 随机匹配通话</p>
+        <p className="text-neutral-500 text-[11px]">以你想要的样子,遇见世界</p>
       </div>
 
       {/* Avatar-preview banner */}
@@ -469,12 +469,12 @@ export default function Home() {
           disabled={!activeName || !isConnected}
           className="w-full max-w-xs rounded-2xl bg-gradient-to-r from-sky-500 to-cyan-500 hover:from-sky-600 hover:to-cyan-600 px-8 py-3.5 text-base font-semibold shadow-xl shadow-sky-500/25 disabled:opacity-40 disabled:cursor-not-allowed disabled:shadow-none transition"
         >
-          开始匹配
+          开始聊天
         </button>
       ) : (
         <div className="flex flex-col items-center gap-3">
           <div className="h-6 w-6 animate-spin rounded-full border-2 border-neutral-600 border-t-white" />
-          <p className="text-neutral-400 text-sm">正在寻找匹配对象...</p>
+          <p className="text-neutral-400 text-sm">正在为你连线聊伴…</p>
           <MatchButton
             label="取消"
             variant="secondary"
