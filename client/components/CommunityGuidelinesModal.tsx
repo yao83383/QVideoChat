@@ -63,8 +63,11 @@ export default function CommunityGuidelinesModal({ onAccept }: Props) {
         <div className="text-center">
           <div className="text-4xl mb-2">🌏</div>
           <h2 className="text-xl font-bold">欢迎来到 QVideoChat</h2>
-          <p className="text-neutral-400 text-xs mt-1 leading-relaxed">
-            一个用化身练语言、交朋友、了解广袤世界、辅助你成长的地方
+          <p className="text-neutral-200 text-sm mt-2 font-medium tracking-wide">
+            以你想要的样子,遇见世界
+          </p>
+          <p className="text-neutral-500 text-[10px] mt-1.5">
+            练语言 · 交朋友 · 见世界 · 一起成长
           </p>
         </div>
 
