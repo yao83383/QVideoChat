@@ -209,7 +209,7 @@ function LoginForm() {
     const ss = String(remaining % 60).padStart(2, "0");
     return (
       <main className="flex min-h-screen flex-col items-center justify-center px-4 gap-6">
-        <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-sky-500 to-cyan-500 flex items-center justify-center text-2xl shadow-lg shadow-sky-500/25 animate-pulse">⏳</div>
+        <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-sky-400 via-cyan-400 to-emerald-500 flex items-center justify-center text-2xl shadow-lg shadow-emerald-500/25 animate-pulse">⏳</div>
         <h1 className="text-2xl font-bold">申请中</h1>
         <p className="text-neutral-400 text-sm text-center max-w-sm">
           正在等待 <span className="text-neutral-200 font-medium">{pending?.targetUsername || "邀请人"}</span>(<span className="font-mono">{pending?.targetDisplayId || inviterDisplayId}</span>) 审核
@@ -263,7 +263,7 @@ function LoginForm() {
         <button
           type="button"
           onClick={() => router.push("/")}
-          className="w-full max-w-sm rounded-2xl bg-gradient-to-r from-sky-500 to-cyan-500 hover:from-sky-600 hover:to-cyan-600 px-6 py-3 text-sm font-semibold transition shadow-lg shadow-sky-500/25"
+          className="w-full max-w-sm rounded-2xl bg-gradient-to-r from-sky-400 via-cyan-400 to-emerald-500 hover:from-sky-500 hover:via-cyan-500 hover:to-emerald-600 px-6 py-3 text-sm font-semibold transition shadow-lg shadow-emerald-500/25"
         >
           进入 QVideoChat
         </button>
@@ -287,7 +287,7 @@ function LoginForm() {
           <button
             type="button"
             onClick={restartRegister}
-            className="w-full rounded-2xl bg-gradient-to-r from-sky-500 to-cyan-500 hover:from-sky-600 hover:to-cyan-600 px-6 py-3 text-sm font-semibold transition shadow-lg shadow-sky-500/25"
+            className="w-full rounded-2xl bg-gradient-to-r from-sky-400 via-cyan-400 to-emerald-500 hover:from-sky-500 hover:via-cyan-500 hover:to-emerald-600 px-6 py-3 text-sm font-semibold transition shadow-lg shadow-emerald-500/25"
           >
             重新申请
           </button>
@@ -314,7 +314,7 @@ function LoginForm() {
       </button>
 
       <div className="mt-12 flex flex-col items-center gap-2 mb-8">
-        <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-sky-500 to-cyan-500 flex items-center justify-center text-2xl mb-2 shadow-lg shadow-sky-500/25">🎭</div>
+        <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-sky-400 via-cyan-400 to-emerald-500 flex items-center justify-center text-2xl mb-2 shadow-lg shadow-emerald-500/25">🎭</div>
         <h1 className="text-2xl font-bold">加入 QVideoChat</h1>
         <p className="text-neutral-500 text-xs">邀请制内测 · 需要邀请人 ID</p>
       </div>
@@ -515,7 +515,7 @@ function LoginForm() {
             {error && <p className="text-red-400 text-xs text-center">{error}</p>}
 
             <button type="button" onClick={handleRegisterClick} disabled={busy}
-              className="rounded-2xl bg-gradient-to-r from-sky-500 to-cyan-500 hover:from-sky-600 hover:to-cyan-600 px-8 py-3 text-sm font-semibold transition shadow-lg shadow-sky-500/25 disabled:opacity-40"
+              className="rounded-2xl bg-gradient-to-r from-sky-400 via-cyan-400 to-emerald-500 hover:from-sky-500 hover:via-cyan-500 hover:to-emerald-600 px-8 py-3 text-sm font-semibold transition shadow-lg shadow-emerald-500/25 disabled:opacity-40"
             >
               {busy ? "提交中…" : "申请注册"}
             </button>
@@ -567,7 +567,7 @@ function LoginForm() {
             <p className="text-[10px] text-neutral-500 text-center">如果不方便同步,可以先游客模式匹配,再在通话中让对方邀请你</p>
             <div className="flex flex-col gap-2 mt-2">
               <button type="button" onClick={submitRegister}
-                className="w-full rounded-2xl bg-gradient-to-r from-sky-500 to-cyan-500 px-6 py-2.5 text-sm font-semibold transition"
+                className="w-full rounded-2xl bg-gradient-to-r from-sky-400 via-cyan-400 to-emerald-500 px-6 py-2.5 text-sm font-semibold transition"
               >我已联系好,提交</button>
               <button type="button" onClick={() => setShowPreSubmit(false)}
                 className="text-xs text-neutral-500 hover:text-neutral-300 py-2"

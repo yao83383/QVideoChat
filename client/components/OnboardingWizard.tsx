@@ -199,7 +199,7 @@ export default function OnboardingWizard({
               <button
                 onClick={openCamera}
                 disabled={cameraBusy}
-                className="w-full rounded-2xl bg-gradient-to-r from-sky-500 to-cyan-500 hover:from-sky-600 hover:to-cyan-600 px-8 py-3.5 text-base font-semibold shadow-xl shadow-sky-500/30 disabled:opacity-50 transition"
+                className="w-full rounded-2xl bg-gradient-to-r from-sky-400 via-cyan-400 to-emerald-500 hover:from-sky-500 hover:via-cyan-500 hover:to-emerald-600 px-8 py-3.5 text-base font-semibold shadow-xl shadow-emerald-500/30 disabled:opacity-50 transition"
               >
                 {cameraBusy ? "正在打开..." : "打开摄像头"}
               </button>
@@ -223,7 +223,7 @@ export default function OnboardingWizard({
           ) : (
             <button
               onClick={next}
-              className="w-full rounded-2xl bg-gradient-to-r from-sky-500 to-cyan-500 hover:from-sky-600 hover:to-cyan-600 px-8 py-3.5 text-base font-semibold shadow-xl shadow-sky-500/30 transition"
+              className="w-full rounded-2xl bg-gradient-to-r from-sky-400 via-cyan-400 to-emerald-500 hover:from-sky-500 hover:via-cyan-500 hover:to-emerald-600 px-8 py-3.5 text-base font-semibold shadow-xl shadow-emerald-500/30 transition"
             >
               下一步
             </button>

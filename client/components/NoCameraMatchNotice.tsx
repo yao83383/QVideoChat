@@ -66,7 +66,7 @@ export default function NoCameraMatchNotice({ onCancel, onProceed }: Props) {
           <button
             type="button"
             onClick={onProceed}
-            className="w-full rounded-2xl bg-gradient-to-r from-sky-500 to-cyan-500 hover:from-sky-600 hover:to-cyan-600 text-white px-6 py-3 text-sm font-semibold shadow-lg shadow-sky-500/30 transition"
+            className="w-full rounded-2xl bg-gradient-to-r from-sky-400 via-cyan-400 to-emerald-500 hover:from-sky-500 hover:via-cyan-500 hover:to-emerald-600 text-white px-6 py-3 text-sm font-semibold shadow-lg shadow-emerald-500/30 transition"
           >
             知道了,继续匹配
           </button>

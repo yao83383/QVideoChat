@@ -119,7 +119,7 @@ export default function CommunityGuidelinesModal({ onAccept }: Props) {
           disabled={!guidelinesOk}
           className={`w-full rounded-2xl px-6 py-3 text-sm font-semibold transition ${
             guidelinesOk
-              ? "bg-gradient-to-r from-sky-500 to-cyan-500 hover:from-sky-600 hover:to-cyan-600 text-white shadow-lg shadow-sky-500/30"
+              ? "bg-gradient-to-r from-sky-400 via-cyan-400 to-emerald-500 hover:from-sky-500 hover:via-cyan-500 hover:to-emerald-600 text-white shadow-lg shadow-emerald-500/30"
               : "bg-neutral-800 text-neutral-500 cursor-not-allowed border border-white/5"
           }`}
         >

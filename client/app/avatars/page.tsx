@@ -235,7 +235,7 @@ function PreviewModal({ entry, isCurrent, onCommit, onDismiss }: PreviewProps) {
             className={`w-full rounded-2xl px-6 py-3 text-sm font-semibold transition ${
               isCurrent
                 ? "bg-neutral-800 border border-white/10 text-neutral-500 cursor-default"
-                : "bg-gradient-to-r from-sky-500 to-cyan-500 hover:from-sky-600 hover:to-cyan-600 text-white shadow-lg shadow-sky-500/30"
+                : "bg-gradient-to-r from-sky-400 via-cyan-400 to-emerald-500 hover:from-sky-500 hover:via-cyan-500 hover:to-emerald-600 text-white shadow-lg shadow-emerald-500/30"
             }`}
           >
             {isCurrent ? "当前化身" : "选为我的化身"}

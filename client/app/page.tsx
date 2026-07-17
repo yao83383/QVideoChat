@@ -467,7 +467,7 @@ export default function Home() {
         <button
           onClick={handleMatch}
           disabled={!activeName || !isConnected}
-          className="w-full max-w-xs rounded-2xl bg-gradient-to-r from-sky-500 to-cyan-500 hover:from-sky-600 hover:to-cyan-600 px-8 py-3.5 text-base font-semibold shadow-xl shadow-sky-500/25 disabled:opacity-40 disabled:cursor-not-allowed disabled:shadow-none transition"
+          className="w-full max-w-xs rounded-2xl bg-gradient-to-r from-sky-400 via-cyan-400 to-emerald-500 hover:from-sky-500 hover:via-cyan-500 hover:to-emerald-600 px-8 py-3.5 text-base font-semibold shadow-xl shadow-emerald-500/25 disabled:opacity-40 disabled:cursor-not-allowed disabled:shadow-none transition"
         >
           开始聊天
         </button>

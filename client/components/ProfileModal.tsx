@@ -158,7 +158,7 @@ export default function ProfileModal({
         <button
           type="button"
           onClick={onClose}
-          className="w-full rounded-2xl bg-gradient-to-r from-sky-500 to-cyan-500 hover:from-sky-600 hover:to-cyan-600 px-6 py-3 text-sm font-semibold shadow-lg shadow-sky-500/20 transition"
+          className="w-full rounded-2xl bg-gradient-to-r from-sky-400 via-cyan-400 to-emerald-500 hover:from-sky-500 hover:via-cyan-500 hover:to-emerald-600 px-6 py-3 text-sm font-semibold shadow-lg shadow-emerald-500/20 transition"
         >
           完成
         </button>

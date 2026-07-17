@@ -93,7 +93,7 @@ export default function PendingInvitationsPanel() {
                 type="button"
                 onClick={() => handleAction(inv.guestUserId, "confirm")}
                 disabled={busy === inv.guestUserId}
-                className="flex-1 rounded-lg bg-gradient-to-r from-sky-500 to-cyan-500 hover:from-sky-600 hover:to-cyan-600 py-1.5 text-xs font-semibold text-white disabled:opacity-40 transition"
+                className="flex-1 rounded-lg bg-gradient-to-r from-sky-400 via-cyan-400 to-emerald-500 hover:from-sky-500 hover:via-cyan-500 hover:to-emerald-600 py-1.5 text-xs font-semibold text-white disabled:opacity-40 transition"
               >
                 {busy === inv.guestUserId ? "…" : "通过"}
               </button>
