@@ -822,7 +822,7 @@ export default function RoomClient() {
                 </p>
               )}
               {!asrError && asrStatus === "speaking" && !mySourceText && (
-                <p className="text-purple-300/70 text-[10px] italic mt-1">说话中...</p>
+                <p className="text-sky-300/70 text-[10px] italic mt-1">说话中...</p>
               )}
               {!asrError && asrStatus === "loading" && !mySourceText && (
                 <p className="text-yellow-300/70 text-[10px] italic mt-1">首次加载识别模型，请稍候...</p>

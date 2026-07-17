@@ -75,7 +75,7 @@ export default function DesktopTitleBar() {
       <div
         className={`flex items-center gap-2 ${isMac ? "pl-20" : "pl-3"}`}
       >
-        <div className="w-4 h-4 rounded-full bg-gradient-to-br from-purple-400 via-pink-400 to-purple-600 shadow-[0_0_10px_rgba(168,85,247,0.55)]" />
+        <div className="w-4 h-4 rounded-full bg-gradient-to-br from-sky-400 via-cyan-400 to-sky-600 shadow-[0_0_10px_rgba(14,165,233,0.55)]" />
         <span className="text-[11px] font-medium tracking-wide text-white/80">
           QVideoChat
         </span>

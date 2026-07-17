@@ -317,7 +317,7 @@ function openPetWindow(target = "self") {
 }
 
 /**
- * Build a purple-circle tray icon in-process — avoids shipping a separate
+ * Build a sky-blue circle tray icon in-process — avoids shipping a separate
  * PNG asset until we design a real logo. 32x32 BGRA bitmap; Windows
  * automatically down-samples for the 16x16 tray slot.
  */
@@ -331,10 +331,12 @@ function buildTrayIcon() {
       const r2 = dx * dx + dy * dy;
       const idx = (y * SIZE + x) * 4;
       if (r2 < 210) {
-        // Filled purple (matches the brand gradient's warm end).
-        buf[idx] = 247;      // B
-        buf[idx + 1] = 85;   // G
-        buf[idx + 2] = 168;  // R
+        // Filled sky-blue (matches the brand's cyan/blue gradient — bright,
+        // sunny, gender-neutral). Was purple (247,85,168 BGRA) before v1.4
+        // rebrand toward the language-learning tone.
+        buf[idx] = 233;      // B  (sky-500 = #0ea5e9)
+        buf[idx + 1] = 165;  // G
+        buf[idx + 2] = 14;   // R
         buf[idx + 3] = 255;  // A
       }
       // else: leaves alpha 0 — transparent corners so the icon reads as a circle.

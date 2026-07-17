@@ -170,7 +170,7 @@ export default function ProfilePage() {
       <hr className="w-64 border-neutral-800" />
       <button
         onClick={() => router.push("/avatars")}
-        className="w-full max-w-sm rounded-2xl bg-gradient-to-r from-purple-500/20 to-pink-500/20 border border-purple-500/30 hover:border-purple-500/60 transition px-5 py-4 flex items-center justify-between"
+        className="w-full max-w-sm rounded-2xl bg-gradient-to-r from-sky-500/20 to-cyan-500/20 border border-sky-500/30 hover:border-sky-500/60 transition px-5 py-4 flex items-center justify-between"
       >
         <span className="flex items-center gap-3">
           <span className="text-2xl">🎭</span>

@@ -362,7 +362,7 @@ export default function Home() {
 
       {/* Avatar-preview banner */}
       {showAvatarBanner && (
-        <div className="w-full max-w-sm flex items-center gap-2 rounded-full bg-gradient-to-r from-purple-500/15 to-pink-500/15 border border-purple-500/25 pl-4 pr-2 py-1.5">
+        <div className="w-full max-w-sm flex items-center gap-2 rounded-full bg-gradient-to-r from-sky-500/15 to-cyan-500/15 border border-sky-500/25 pl-4 pr-2 py-1.5">
           <button
             type="button"
             onClick={openAvatarPage}
@@ -431,7 +431,7 @@ export default function Home() {
         >
           <span className="text-neutral-500">化身</span>
           <span className="font-medium text-neutral-100">{selectedEntry.name}</span>
-          <span className="text-purple-300 group-hover:text-purple-200">换一换 →</span>
+          <span className="text-sky-300 group-hover:text-sky-200">换一换 →</span>
         </button>
       </div>
 
@@ -456,7 +456,7 @@ export default function Home() {
               ? `${selectedTags.length} 个标签`
               : "未选标签"}
           </span>
-          <span className="text-purple-300 group-hover:text-purple-200 ml-1">
+          <span className="text-sky-300 group-hover:text-sky-200 ml-1">
             编辑 →
           </span>
         </span>
@@ -467,7 +467,7 @@ export default function Home() {
         <button
           onClick={handleMatch}
           disabled={!activeName || !isConnected}
-          className="w-full max-w-xs rounded-2xl bg-gradient-to-r from-purple-500 to-pink-500 hover:from-purple-600 hover:to-pink-600 px-8 py-3.5 text-base font-semibold shadow-xl shadow-purple-500/25 disabled:opacity-40 disabled:cursor-not-allowed disabled:shadow-none transition"
+          className="w-full max-w-xs rounded-2xl bg-gradient-to-r from-sky-500 to-cyan-500 hover:from-sky-600 hover:to-cyan-600 px-8 py-3.5 text-base font-semibold shadow-xl shadow-sky-500/25 disabled:opacity-40 disabled:cursor-not-allowed disabled:shadow-none transition"
         >
           开始匹配
         </button>

@@ -76,7 +76,7 @@ export default function ProfileModal({
       >
         <div className="flex items-center justify-between">
           <div>
-            <p className="text-purple-400 text-[10px] font-semibold tracking-widest uppercase">
+            <p className="text-sky-400 text-[10px] font-semibold tracking-widest uppercase">
               Profile
             </p>
             <h2 className="text-lg font-semibold mt-0.5">我的资料</h2>
@@ -116,7 +116,7 @@ export default function ProfileModal({
                 <button
                   type="button"
                   onClick={onRegenerateGuestName}
-                  className="text-[11px] text-purple-300 hover:text-purple-100 hover:underline whitespace-nowrap"
+                  className="text-[11px] text-sky-300 hover:text-sky-100 hover:underline whitespace-nowrap"
                   title="重新抽一个"
                 >
                   重抽 ⟳
@@ -158,7 +158,7 @@ export default function ProfileModal({
         <button
           type="button"
           onClick={onClose}
-          className="w-full rounded-2xl bg-gradient-to-r from-purple-500 to-pink-500 hover:from-purple-600 hover:to-pink-600 px-6 py-3 text-sm font-semibold shadow-lg shadow-purple-500/20 transition"
+          className="w-full rounded-2xl bg-gradient-to-r from-sky-500 to-cyan-500 hover:from-sky-600 hover:to-cyan-600 px-6 py-3 text-sm font-semibold shadow-lg shadow-sky-500/20 transition"
         >
           完成
         </button>

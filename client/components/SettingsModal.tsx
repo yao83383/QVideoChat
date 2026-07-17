@@ -121,7 +121,7 @@ export default function SettingsModal({ show, onClose }: Props) {
                   onClick={() => saveGender(g.code)}
                   className={`rounded-xl px-2 py-2 text-xs font-medium transition flex flex-col items-center gap-1 ${
                     active
-                      ? "bg-purple-600 text-white shadow shadow-purple-600/30"
+                      ? "bg-sky-600 text-white shadow shadow-sky-600/30"
                       : locked
                       ? "bg-neutral-800/50 text-neutral-600 border border-neutral-800 cursor-not-allowed"
                       : "bg-neutral-800 text-neutral-300 hover:bg-neutral-700 border border-neutral-700"

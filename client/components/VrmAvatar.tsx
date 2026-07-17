@@ -352,7 +352,7 @@ export default function VrmAvatar({
                  in the room). */}
         {modelStatus === "loading" && placeholderEmoji && (
           <>
-            <div className={`pointer-events-none absolute inset-0 flex items-center justify-center ${transparent ? "" : `bg-gradient-to-br ${placeholderTint || "from-purple-500/25 to-pink-500/25"}`}`}>
+            <div className={`pointer-events-none absolute inset-0 flex items-center justify-center ${transparent ? "" : `bg-gradient-to-br ${placeholderTint || "from-sky-500/25 to-cyan-500/25"}`}`}>
               <span className="text-8xl opacity-70 select-none drop-shadow-lg" aria-hidden>{placeholderEmoji}</span>
             </div>
             <div className="pointer-events-none absolute inset-x-0 bottom-2 flex flex-col items-center gap-1.5 px-4">
@@ -360,7 +360,7 @@ export default function VrmAvatar({
                 <>
                   <div className="w-28 h-1 rounded-full bg-black/50 overflow-hidden shadow">
                     <div
-                      className="h-full bg-gradient-to-r from-purple-300 to-pink-300 transition-all duration-100"
+                      className="h-full bg-gradient-to-r from-sky-300 to-cyan-300 transition-all duration-100"
                       style={{ width: `${loadProgress.percent}%` }}
                     />
                   </div>
@@ -387,7 +387,7 @@ export default function VrmAvatar({
                 </p>
                 <div className="w-28 h-1 rounded-full bg-neutral-800/80 overflow-hidden">
                   <div
-                    className="h-full bg-gradient-to-r from-purple-400 to-pink-400 transition-all duration-100"
+                    className="h-full bg-gradient-to-r from-sky-400 to-cyan-400 transition-all duration-100"
                     style={{ width: `${loadProgress.percent}%` }}
                   />
                 </div>

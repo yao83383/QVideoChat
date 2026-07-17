@@ -83,7 +83,7 @@ export default function LangFilterBar({ onChange }: Props) {
               onClick={() => pickSl(l.code)}
               className={`rounded-lg px-2.5 py-1 text-xs font-medium transition ${
                 sl === l.code
-                  ? "bg-purple-600 text-white shadow-md shadow-purple-600/30"
+                  ? "bg-sky-600 text-white shadow-md shadow-sky-600/30"
                   : "bg-neutral-800 text-neutral-400 hover:bg-neutral-700 border border-neutral-700"
               }`}
               title={l.label}
@@ -106,7 +106,7 @@ export default function LangFilterBar({ onChange }: Props) {
                 disabled={disabled}
                 className={`rounded-lg px-2.5 py-1 text-xs font-medium transition ${
                   tl === l.code && !disabled
-                    ? "bg-pink-600 text-white shadow-md shadow-pink-600/30"
+                    ? "bg-cyan-600 text-white shadow-md shadow-cyan-600/30"
                     : disabled
                     ? "bg-neutral-900 text-neutral-700 border border-neutral-800 cursor-not-allowed"
                     : "bg-neutral-800 text-neutral-400 hover:bg-neutral-700 border border-neutral-700"

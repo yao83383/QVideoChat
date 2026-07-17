@@ -55,7 +55,7 @@ export default function LanguageSelector({
         onClick={onSubtitleToggle}
         className={`flex items-center gap-1 rounded-full px-3 py-1 text-xs transition ${
           subtitleEnabled
-            ? "bg-purple-700/40 border border-purple-600 text-purple-300"
+            ? "bg-sky-700/40 border border-sky-600 text-sky-300"
             : "bg-neutral-800 border border-neutral-700 text-neutral-500"
         }`}
         title={subtitleEnabled ? "关闭 AI 字幕" : "开启 AI 字幕"}
@@ -86,7 +86,7 @@ export default function LanguageSelector({
                     onClick={() => { onSourceChange(l.code); setOpen(false); }}
                     className={`flex items-center gap-1 rounded-lg px-2 py-1 text-xs transition ${
                       sourceLang === l.code
-                        ? "bg-purple-700/30 border border-purple-600 text-purple-300"
+                        ? "bg-sky-700/30 border border-sky-600 text-sky-300"
                         : "bg-neutral-800 border border-neutral-700 text-neutral-400 hover:border-neutral-500"
                     }`}
                   >

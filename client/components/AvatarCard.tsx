@@ -18,7 +18,7 @@ export default function AvatarCard({ entry, selected, onClick }: Props) {
     <button
       type="button"
       onClick={onClick}
-      className={`relative w-full rounded-3xl bg-gradient-to-br ${entry.tint} border transition p-5 flex flex-col items-center gap-3 text-left focus:outline-none focus:ring-2 focus:ring-purple-500/40 ${
+      className={`relative w-full rounded-3xl bg-gradient-to-br ${entry.tint} border transition p-5 flex flex-col items-center gap-3 text-left focus:outline-none focus:ring-2 focus:ring-sky-500/40 ${
         selected
           ? "border-green-500/70 shadow-lg shadow-green-500/20"
           : "border-white/10 hover:border-white/25"

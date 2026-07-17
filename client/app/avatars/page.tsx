@@ -58,7 +58,7 @@ export default function AvatarsPage() {
 
       {/* Header */}
       <div className="w-full max-w-3xl text-center">
-        <p className="text-purple-400 text-xs font-semibold tracking-widest uppercase mb-2">Avatars</p>
+        <p className="text-sky-400 text-xs font-semibold tracking-widest uppercase mb-2">Avatars</p>
         <h1 className="text-3xl sm:text-4xl font-bold tracking-tight mb-3">挑一个化身</h1>
         <p className="text-neutral-400 text-sm max-w-xl mx-auto">
           点开预览,选中的化身会在通话中代表你出镜。
@@ -235,7 +235,7 @@ function PreviewModal({ entry, isCurrent, onCommit, onDismiss }: PreviewProps) {
             className={`w-full rounded-2xl px-6 py-3 text-sm font-semibold transition ${
               isCurrent
                 ? "bg-neutral-800 border border-white/10 text-neutral-500 cursor-default"
-                : "bg-gradient-to-r from-purple-500 to-pink-500 hover:from-purple-600 hover:to-pink-600 text-white shadow-lg shadow-purple-500/30"
+                : "bg-gradient-to-r from-sky-500 to-cyan-500 hover:from-sky-600 hover:to-cyan-600 text-white shadow-lg shadow-sky-500/30"
             }`}
           >
             {isCurrent ? "当前化身" : "选为我的化身"}

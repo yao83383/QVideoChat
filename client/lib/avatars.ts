@@ -37,7 +37,7 @@ export const AVATARS: AvatarEntry[] = [
     emoji: "🎭",
     gender: "unisex",
     vrmPath: "unisex/DLco.vrm",
-    tint: "from-purple-500/20 to-pink-500/20",
+    tint: "from-sky-500/20 to-cyan-500/20",
   },
   {
     id: "female-white",

@@ -143,7 +143,7 @@ export default function OnboardingWizard({
                       onClick={() => setSl(l.code)}
                       className={`rounded-xl px-4 py-2 text-sm font-medium transition ${
                         sl === l.code
-                          ? "bg-purple-600 text-white shadow-lg shadow-purple-600/30"
+                          ? "bg-sky-600 text-white shadow-lg shadow-sky-600/30"
                           : "bg-neutral-800 text-neutral-300 hover:bg-neutral-700 border border-neutral-700"
                       }`}
                     >
@@ -162,7 +162,7 @@ export default function OnboardingWizard({
                       onClick={() => setTl(l.code)}
                       className={`rounded-xl px-4 py-2 text-sm font-medium transition ${
                         tl === l.code
-                          ? "bg-pink-600 text-white shadow-lg shadow-pink-600/30"
+                          ? "bg-cyan-600 text-white shadow-lg shadow-cyan-600/30"
                           : "bg-neutral-800 text-neutral-300 hover:bg-neutral-700 border border-neutral-700"
                       }`}
                     >
@@ -199,7 +199,7 @@ export default function OnboardingWizard({
               <button
                 onClick={openCamera}
                 disabled={cameraBusy}
-                className="w-full rounded-2xl bg-gradient-to-r from-purple-500 to-pink-500 hover:from-purple-600 hover:to-pink-600 px-8 py-3.5 text-base font-semibold shadow-xl shadow-purple-500/30 disabled:opacity-50 transition"
+                className="w-full rounded-2xl bg-gradient-to-r from-sky-500 to-cyan-500 hover:from-sky-600 hover:to-cyan-600 px-8 py-3.5 text-base font-semibold shadow-xl shadow-sky-500/30 disabled:opacity-50 transition"
               >
                 {cameraBusy ? "正在打开..." : "打开摄像头"}
               </button>
@@ -214,7 +214,7 @@ export default function OnboardingWizard({
                     onComplete();
                     onGoToAvatars();
                   }}
-                  className="text-xs text-purple-300 hover:text-purple-200 transition py-1"
+                  className="text-xs text-sky-300 hover:text-sky-200 transition py-1"
                 >
                   或者先挑一个化身 →
                 </button>
@@ -223,7 +223,7 @@ export default function OnboardingWizard({
           ) : (
             <button
               onClick={next}
-              className="w-full rounded-2xl bg-gradient-to-r from-purple-500 to-pink-500 hover:from-purple-600 hover:to-pink-600 px-8 py-3.5 text-base font-semibold shadow-xl shadow-purple-500/30 transition"
+              className="w-full rounded-2xl bg-gradient-to-r from-sky-500 to-cyan-500 hover:from-sky-600 hover:to-cyan-600 px-8 py-3.5 text-base font-semibold shadow-xl shadow-sky-500/30 transition"
             >
               下一步
             </button>

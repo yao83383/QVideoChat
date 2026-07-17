@@ -124,7 +124,7 @@ export default function AsrTest() {
           <button
             onClick={start}
             disabled={running}
-            className="rounded-lg bg-purple-600 hover:bg-purple-500 disabled:opacity-40 px-4 py-2 text-sm font-medium"
+            className="rounded-lg bg-sky-600 hover:bg-sky-500 disabled:opacity-40 px-4 py-2 text-sm font-medium"
           >
             开始测试
           </button>

@@ -55,10 +55,10 @@ export default function PendingInvitationsPanel() {
   if (list.length === 0) return null;
 
   return (
-    <div className="w-full max-w-sm rounded-2xl bg-gradient-to-br from-purple-500/10 to-pink-500/10 border border-purple-500/30 p-4 flex flex-col gap-3">
+    <div className="w-full max-w-sm rounded-2xl bg-gradient-to-br from-sky-500/10 to-cyan-500/10 border border-sky-500/30 p-4 flex flex-col gap-3">
       <div className="flex items-center justify-between">
         <h3 className="text-sm font-semibold flex items-center gap-2">
-          <span className="w-2 h-2 rounded-full bg-purple-400 animate-pulse" />
+          <span className="w-2 h-2 rounded-full bg-sky-400 animate-pulse" />
           待处理邀请 ({list.length})
         </h3>
         <span className="text-[10px] text-neutral-500">2 分钟内回应</span>
@@ -93,7 +93,7 @@ export default function PendingInvitationsPanel() {
                 type="button"
                 onClick={() => handleAction(inv.guestUserId, "confirm")}
                 disabled={busy === inv.guestUserId}
-                className="flex-1 rounded-lg bg-gradient-to-r from-purple-500 to-pink-500 hover:from-purple-600 hover:to-pink-600 py-1.5 text-xs font-semibold text-white disabled:opacity-40 transition"
+                className="flex-1 rounded-lg bg-gradient-to-r from-sky-500 to-cyan-500 hover:from-sky-600 hover:to-cyan-600 py-1.5 text-xs font-semibold text-white disabled:opacity-40 transition"
               >
                 {busy === inv.guestUserId ? "…" : "通过"}
               </button>
