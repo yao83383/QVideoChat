@@ -29,5 +29,9 @@ client/public/models/unisex/
 # TypeScript incremental build cache
 client/tsconfig.tsbuildinfo
 
+# Electron-builder output — portable exe + win-unpacked staging can be
+# ~500MB+, don't want in git. Release binaries are distributed out-of-band.
+client/release/
+
 # Next.js static export
 client/out/

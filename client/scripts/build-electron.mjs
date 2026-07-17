@@ -34,7 +34,7 @@ const env = {
   NEXT_ELECTRON: "1",
   NEXT_PUBLIC_BASE_PATH: "",
   NEXT_PUBLIC_APP_VERSION:
-    process.env.NEXT_PUBLIC_APP_VERSION || "1.4.0.001-electron",
+    process.env.NEXT_PUBLIC_APP_VERSION || "1.4.0.001-portable",
 };
 
 console.log("[electron-build] running next build (target=electron export) …");
