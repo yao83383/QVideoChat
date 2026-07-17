@@ -2,14 +2,12 @@
 
 import { useState, useEffect, useRef, useMemo } from "react";
 import { useRouter } from "next/navigation";
-import NameInput from "@/components/NameInput";
 import MatchButton from "@/components/MatchButton";
 import VrmAvatar from "@/components/VrmAvatar";
-import TagSelector from "@/components/TagSelector";
-import LangFilterBar from "@/components/LangFilterBar";
 import FriendList from "@/components/FriendList";
 import LoginPrompt from "@/components/LoginPrompt";
 import SettingsModal from "@/components/SettingsModal";
+import ProfileModal from "@/components/ProfileModal";
 import OnboardingWizard from "@/components/OnboardingWizard";
 import CommunityGuidelinesModal, { needsCommunityGate } from "@/components/CommunityGuidelinesModal";
 import NoCameraMatchNotice from "@/components/NoCameraMatchNotice";
@@ -17,25 +15,36 @@ import { useFaceMesh } from "@/hooks/useFaceMesh";
 import { useSocket } from "@/hooks/useSocket";
 import { useUser } from "@/hooks/useUser";
 import { useSelectedAvatar } from "@/hooks/useSelectedAvatar";
+import { useGuestName } from "@/hooks/useGuestName";
 import { AVATARS, DEFAULT_AVATAR_ID } from "@/lib/avatars";
 import { preloadSherpa } from "@/lib/ai/sherpa-engine";
 import { preloadPair } from "@/lib/ai/translate";
 import type { MatchEvents, SignalEvents } from "@/hooks/useSocket";
 
 // Rotating showcase for the "换个化身试试" banner. Pulled from AVATARS at
-// module init so the copy can never drift out of sync with the actual roster
-// (v1.2.3.001 shipped hard-coded names for chars that didn't exist — that's
-// exactly what this closes off).
+// module init so the copy can never drift out of sync with the actual roster.
 const FEATURED_BANNER_NAMES = AVATARS
   .filter((a) => a.id !== DEFAULT_AVATAR_ID)
   .slice(0, 3)
   .map((a) => a.name)
   .join(" · ");
 
+const LANG_LABEL: Record<string, string> = {
+  zh: "中文", en: "英文", ja: "日文", ko: "韩文",
+};
+
+function readLangPref(key: string, fallback: string): string {
+  if (typeof window === "undefined") return fallback;
+  try {
+    const raw = localStorage.getItem(key);
+    return raw ? JSON.parse(raw) : fallback;
+  } catch { return fallback; }
+}
+
 export default function Home() {
   const router = useRouter();
   const { user, loading: userLoading, createUser } = useUser();
-  const [username, setUsername] = useState("");
+  const { guestName, regenerate: regenerateGuestName } = useGuestName();
   const [matchStatus, setMatchStatus] = useState<"idle" | "matching">("idle");
   const [showFriends, setShowFriends] = useState(false);
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
@@ -43,12 +52,28 @@ export default function Home() {
   const [banMsg, setBanMsg] = useState("");
   const [showLoginModal, setShowLoginModal] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
-  // Camera-off warning modal. Fires when the user tries to match without ever
-  // opening the camera — parent-owned so runMatch can be re-invoked on the
-  // Proceed branch without wiring the whole match closure into the modal.
+  const [showProfile, setShowProfile] = useState(false);
   const [showNoCameraNotice, setShowNoCameraNotice] = useState(false);
-  const usernameRef = useRef(username);
-  usernameRef.current = username;
+
+  // The "identity" the user will match under: registered username wins, else
+  // the auto-generated guest name (see memory:oc-platform-vision — every
+  // anon is a "未知'原创'角色N"). Refs keep the value fresh for callbacks
+  // that were memoized before the hook resolved.
+  const activeName = user?.username?.trim() || guestName;
+  const activeNameRef = useRef(activeName);
+  activeNameRef.current = activeName;
+
+  // Language pair — pulled at mount + refreshed when ProfileModal closes so
+  // the chip label stays honest. Persisted by LangFilterBar to qv_sl/qv_tl.
+  const [langs, setLangs] = useState<{ sl: string; tl: string }>(() => ({
+    sl: readLangPref("qv_sl", "zh"),
+    tl: readLangPref("qv_tl", "en"),
+  }));
+  const refreshLangsFromStorage = () =>
+    setLangs({
+      sl: readLangPref("qv_sl", "zh"),
+      tl: readLangPref("qv_tl", "en"),
+    });
 
   // Pick avatar hero size once at mount from viewport width so mobile / desktop
   // both fit without re-measuring on resize (VrmAvatar's WebGL effect keys on
@@ -58,10 +83,15 @@ export default function Home() {
     return Math.min(window.innerWidth - 32, 360);
   });
 
-  // Restore username from user state
+  // Restore previously-saved tags so the chip shows accurate counts even before
+  // the user opens ProfileModal. Same key ProfileModal + RoomClient read.
   useEffect(() => {
-    if (user?.username && !username) setUsername(user.username);
-  }, [user?.username]);
+    try {
+      const raw = localStorage.getItem("qv_pendingTags");
+      const parsed = raw ? JSON.parse(raw) : [];
+      if (Array.isArray(parsed)) setSelectedTags(parsed);
+    } catch { /* ignore */ }
+  }, []);
 
   const matchEvents: MatchEvents = useMemo(
     () => ({
@@ -70,7 +100,7 @@ export default function Home() {
         const params = new URLSearchParams({
           id: data.roomId,
           uid: user?.userId || "",
-          uname: usernameRef.current,
+          uname: activeNameRef.current,
           puid: data.partner.userId,
           pname: data.partner.username,
           reg: user?.isRegistered ? "1" : "0",
@@ -87,7 +117,7 @@ export default function Home() {
         window.location.reload();
       },
     }),
-    [user?.userId, router],
+    [user?.userId, router, user?.isRegistered],
   );
 
   const signalEvents: SignalEvents = useMemo(
@@ -99,7 +129,8 @@ export default function Home() {
     [],
   );
 
-  const { isConnected, joinMatch, cancelMatch, socketRef } = useSocket(matchEvents, signalEvents);
+  const { isConnected, joinMatch: _joinMatch, cancelMatch, socketRef } = useSocket(matchEvents, signalEvents);
+  void _joinMatch;
   const { blendshapeRef, poseRef, isLoaded, isCameraOn, error, step, faceFound, start, stop, toggleCamera } = useFaceMesh();
   const { selectedEntry } = useSelectedAvatar();
 
@@ -114,18 +145,12 @@ export default function Home() {
     setShowCommunityGate(needsCommunityGate());
   }, []);
 
-  // Onboarding gate. Read `qv_onboarded` on mount; if it's missing, mount the
-  // wizard. `showOnboarding=null` during hydration to avoid SSR/CSR mismatch
-  // (localStorage isn't available on the server), then resolves to boolean
-  // after the first client-side effect.
   const [showOnboarding, setShowOnboarding] = useState<boolean | null>(null);
   useEffect(() => {
     if (typeof window === "undefined") return;
     setShowOnboarding(localStorage.getItem("qv_onboarded") !== "1");
   }, []);
 
-  // Avatar-preview banner state. Same hydration dance — read once client-side,
-  // hide forever after the user dismisses it (per-browser localStorage).
   const [showAvatarBanner, setShowAvatarBanner] = useState<boolean | null>(null);
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -151,10 +176,6 @@ export default function Home() {
     router.push("/avatars");
   };
 
-  // Separate counter from openAvatarPage: this fires from the always-visible
-  // pill under the hero, not from the dismissible top banner. Splitting them
-  // lets us see which entry point returning users actually reach for once the
-  // banner has been closed.
   const openAvatarFromHero = () => {
     try {
       const key = "qv_avatar_hero_click";
@@ -172,9 +193,6 @@ export default function Home() {
     setShowOnboarding(false);
   };
 
-  // Auto-open camera for returning users (qv_onboarded flag set by the wizard
-  // in A3). First-time users don't trigger a permission dialog on landing —
-  // they'll see it during onboarding step 3 as an explained gesture.
   const autoStartTriedRef = useRef(false);
   useEffect(() => {
     if (autoStartTriedRef.current) return;
@@ -187,10 +205,6 @@ export default function Home() {
   }, [start]);
 
   // Bridge blendshape / pose frames to the Electron pet window at ~30fps.
-  // The pet renderer can't run its own MediaPipe (would OOM the wasm memory
-  // shared across same-origin BrowserWindows), so the main window is the
-  // single source of truth and pushes frames through window.qvHost.
-  // Fire-and-forget IPC; drops silently when no pet is open.
   useEffect(() => {
     if (typeof window === "undefined" || !window.qvHost) return;
     const host = window.qvHost;
@@ -203,46 +217,29 @@ export default function Home() {
     return () => clearInterval(iv);
   }, [blendshapeRef, poseRef]);
 
-  // Warm up the ASR + translation pipelines from the home page so they're
-  // ready by the time the user finishes matching. Two rules learned the hard
-  // way in v1.2.2.007:
-  //   1) SERIAL, not parallel. Kicking off sherpa's emscripten runtime AND
-  //      the transformers.js worker at the same time on a cold cache produced
-  //      a "null function" crash inside sherpa's wasm — presumably a race in
-  //      shared feature-detection state or cross-origin isolation checks.
-  //      Awaiting sherpa first sidesteps it.
-  //   2) sherpa's .data (190MB) is now cached in OPFS by resolveDataBlobUrl —
-  //      the second visit reads it locally in a couple seconds, no network.
+  // Warm up ASR + translation pipelines. See historical notes on serial
+  // ordering (sherpa first, then transformers.js) preserved from v1.2.2.007.
   const preloadedRef = useRef(false);
   useEffect(() => {
     if (preloadedRef.current) return;
     preloadedRef.current = true;
-    const readPref = (key: string, fallback: string) => {
-      try { const raw = localStorage.getItem(key); return raw ? JSON.parse(raw) : fallback; }
-      catch { return fallback; }
-    };
     (async () => {
       try {
         await preloadSherpa();
       } catch (e) {
         console.warn("[home] preloadSherpa failed:", e);
-        return; // don't kick opus-mt if sherpa itself is broken — avoid noise
+        return;
       }
-      const sl: string = readPref("qv_sl", "zh");
-      const tl: string = readPref("qv_tl", "en");
-      if (sl !== tl) {
-        try { await preloadPair(sl, tl); }
+      if (langs.sl !== langs.tl) {
+        try { await preloadPair(langs.sl, langs.tl); }
         catch (e) { console.warn("[home] preloadPair failed:", e); }
       }
     })();
-  }, []);
+  }, [langs.sl, langs.tl]);
 
-  // The actual match kickoff: create user if needed, unlock autoplay, and
-  // route into the room. Kept separate from handleMatch so the camera-off
-  // warning modal can invoke it directly on Proceed without duplicating logic.
   const runMatch = async () => {
     if (!isConnected) return;
-    const name = username.trim();
+    const name = activeName;
     if (!name) return;
     let uid = user?.userId;
     if (!uid || !user?.token) {
@@ -255,8 +252,6 @@ export default function Home() {
       }
     }
     setBanMsg("");
-    // Unlock autoplay on this user gesture — otherwise the room page's remote
-    // audio.play() may be blocked by autoplay policy.
     const ac = new (window.AudioContext || (window as any).webkitAudioContext)();
     ac.resume();
     try {
@@ -271,14 +266,8 @@ export default function Home() {
   };
 
   const handleMatch = () => {
-    // Guard rails first: don't waste modal cycles on states the primary button
-    // is already disabled for.
     if (!isConnected) return;
-    if (!username.trim()) return;
-    // Camera-off soft gate. Fires ONCE per session (sessionStorage, not
-    // localStorage) so repeat matches don't nag, but a fresh browser session
-    // still gets the gentle reminder + norms nudge. If camera is on, straight
-    // through.
+    if (!activeName) return;
     if (!isCameraOn) {
       let acked = false;
       try { acked = sessionStorage.getItem("qv_no_camera_ack") === "1"; } catch { /* ignore */ }
@@ -320,18 +309,18 @@ export default function Home() {
 
   return (
     <main className="relative flex min-h-screen flex-col items-center px-4 pt-6 pb-8 gap-5">
-      {/* Top-right nav */}
+      {/* Top-right nav — settings, profile (opens modal), friends, login */}
       <div className="absolute top-4 right-4 flex gap-2 items-center">
         <span
           className={`w-2 h-2 rounded-full ${isConnected ? "bg-green-500" : "bg-red-500"}`}
           title={isConnected ? "已连接服务器" : "未连接服务器"}
         />
         <MatchButton label="⚙" variant="secondary" onClick={() => setShowSettings(true)} />
+        <MatchButton label="我" variant="secondary" onClick={() => setShowProfile(true)} />
         {user?.isRegistered ? (
           <>
-            <span className="text-xs text-neutral-500 mr-1">{user.username}</span>
             <MatchButton label="好友" variant="secondary" onClick={() => setShowFriends(true)} />
-            <MatchButton label="我的" variant="secondary" onClick={() => router.push("/profile")} />
+            <MatchButton label="个人页" variant="secondary" onClick={() => router.push("/profile")} />
           </>
         ) : (
           <MatchButton label="登录/注册" variant="secondary" onClick={() => router.push("/login")} />
@@ -368,11 +357,10 @@ export default function Home() {
       {/* Compact brand */}
       <div className="flex flex-col items-center gap-1 mt-2">
         <h1 className="text-2xl font-bold tracking-tight">QVideoChat</h1>
-        <p className="text-neutral-500 text-[11px]">Q版虚拟形象 · 随机匹配通话</p>
+        <p className="text-neutral-500 text-[11px]">原创角色 · 随机匹配通话</p>
       </div>
 
-      {/* Avatar-preview banner — small callout to /avatars until L1 商城 ships.
-          Dismissible so it doesn't nag returning users. */}
+      {/* Avatar-preview banner */}
       {showAvatarBanner && (
         <div className="w-full max-w-sm flex items-center gap-2 rounded-full bg-gradient-to-r from-purple-500/15 to-pink-500/15 border border-purple-500/25 pl-4 pr-2 py-1.5">
           <button
@@ -403,8 +391,7 @@ export default function Home() {
         </div>
       )}
 
-      {/* Hero: avatar always mounted so the character is always visible even
-          when the camera is off (idle rest pose + breath keeps it alive). */}
+      {/* Hero avatar */}
       <div className="flex flex-col items-center gap-2">
         <VrmAvatar
           blendshapeRef={blendshapeRef}
@@ -415,8 +402,6 @@ export default function Home() {
           placeholderTint={selectedEntry.tint}
           mirror
         />
-        {/* One-line status under the avatar. Priorities:
-              error > tracker-loading > face-not-found > tracking > idle-CTA */}
         <div className="min-h-[28px] flex items-center justify-center text-xs text-center">
           {error && <span className="text-red-400">{error}</span>}
           {!error && step && !isLoaded && (
@@ -439,10 +424,6 @@ export default function Home() {
             </button>
           )}
         </div>
-        {/* Persistent avatar-swap entry point. Sits directly under the hero so
-            it survives banner dismissal — that dismissible top banner is a
-            noticeable-once affordance; this pill is the always-on one that
-            returning users can find without hunting. */}
         <button
           type="button"
           onClick={openAvatarFromHero}
@@ -454,25 +435,38 @@ export default function Home() {
         </button>
       </div>
 
-      {/* Name input (hidden once the user is registered — they already have one) */}
-      {!user?.isRegistered && (
-        <NameInput value={username} onChange={setUsername} disabled={matchStatus !== "idle"} />
-      )}
+      {/* Current-config chip. Opens ProfileModal — the single edit surface
+          for identity + language + tags. Kept subtle so the match CTA below
+          remains the visual anchor. */}
+      <button
+        type="button"
+        onClick={() => setShowProfile(true)}
+        className="group flex flex-col items-center gap-0.5 max-w-sm px-4 py-1.5 rounded-2xl bg-white/[0.03] hover:bg-white/[0.06] border border-white/5 hover:border-white/15 transition"
+      >
+        <span className="text-[13px] text-neutral-100 font-medium truncate max-w-full">
+          {user?.isRegistered ? `@${user.username}` : (activeName || "抽取中…")}
+        </span>
+        <span className="text-[10px] text-neutral-500 flex items-center gap-2 whitespace-nowrap">
+          <span>
+            {LANG_LABEL[langs.sl] || langs.sl} → {LANG_LABEL[langs.tl] || langs.tl}
+          </span>
+          <span className="text-neutral-700">·</span>
+          <span>
+            {selectedTags.length > 0
+              ? `${selectedTags.length} 个标签`
+              : "未选标签"}
+          </span>
+          <span className="text-purple-300 group-hover:text-purple-200 ml-1">
+            编辑 →
+          </span>
+        </span>
+      </button>
 
-      {/* Tag selector */}
-      <TagSelector selected={selectedTags} onChange={setSelectedTags} />
-
-      {/* Language pair — feeds match scoring server-side and drives subtitle
-          translation in the room. Persists to qv_sl / qv_tl, same keys the
-          Onboarding wizard writes. */}
-      <LangFilterBar />
-
-      {/* Primary CTA — matches the marketing site's gradient look for a
-          consistent brand impression once the user lands from justsaysayforfun.com/. */}
+      {/* Primary CTA */}
       {matchStatus === "idle" ? (
         <button
           onClick={handleMatch}
-          disabled={!username.trim() || !isConnected}
+          disabled={!activeName || !isConnected}
           className="w-full max-w-xs rounded-2xl bg-gradient-to-r from-purple-500 to-pink-500 hover:from-purple-600 hover:to-pink-600 px-8 py-3.5 text-base font-semibold shadow-xl shadow-purple-500/25 disabled:opacity-40 disabled:cursor-not-allowed disabled:shadow-none transition"
         >
           开始匹配
@@ -491,7 +485,6 @@ export default function Home() {
 
       {banMsg && <p className="text-red-400 text-sm">{banMsg}</p>}
 
-      {/* Footer version — pushed to bottom via mt-auto */}
       <p className="text-neutral-700 text-[10px] mt-auto pt-4">
         v{process.env.NEXT_PUBLIC_APP_VERSION || "0.0.0"}
       </p>
@@ -504,6 +497,19 @@ export default function Home() {
 
       <LoginPrompt show={showLoginModal} onClose={() => setShowLoginModal(false)} />
       <SettingsModal show={showSettings} onClose={() => setShowSettings(false)} />
+
+      {/* Profile modal — identity + language + tags. Re-reads language
+          keys from localStorage on close so the chip label reflects any
+          change the LangFilterBar inside made. */}
+      <ProfileModal
+        show={showProfile}
+        onClose={() => { setShowProfile(false); refreshLangsFromStorage(); }}
+        guestName={guestName}
+        onRegenerateGuestName={regenerateGuestName}
+        registeredUsername={user?.isRegistered ? user.username || null : null}
+        selectedTags={selectedTags}
+        onTagsChange={setSelectedTags}
+      />
 
       <OnboardingWizard
         show={showOnboarding === true && showCommunityGate === false}
