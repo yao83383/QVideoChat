@@ -112,7 +112,7 @@ export default function AsrTest() {
   };
 
   return (
-    <main className="min-h-screen bg-neutral-950 text-neutral-100 p-6">
+    <main className="qv-dark-surface min-h-screen p-6">
       <div className="max-w-2xl mx-auto space-y-4">
         <h1 className="text-2xl font-bold">Web Speech API 网络诊断</h1>
         <p className="text-sm text-neutral-400">

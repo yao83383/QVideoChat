@@ -67,7 +67,7 @@ export default function DesktopTitleBar() {
 
   return (
     <div
-      className="qv-drag-region fixed inset-x-0 top-0 z-50 flex items-center justify-between select-none border-b border-white/5 bg-gradient-to-b from-neutral-950 via-[#100816] to-[#0a0510]"
+      className="qv-drag-region fixed inset-x-0 top-0 z-50 flex items-center justify-between select-none border-b border-slate-900/10 bg-gradient-to-b from-sky-100/85 via-white/75 to-sky-50/85 backdrop-blur-md"
       style={{ height: BAR_HEIGHT_PX }}
     >
       {/* Left: brand chip. On macOS a chunk of left padding gives the
@@ -75,11 +75,11 @@ export default function DesktopTitleBar() {
       <div
         className={`flex items-center gap-2 ${isMac ? "pl-20" : "pl-3"}`}
       >
-        <div className="w-4 h-4 rounded-full bg-gradient-to-br from-sky-400 via-cyan-400 to-sky-600 shadow-[0_0_10px_rgba(14,165,233,0.55)]" />
-        <span className="text-[11px] font-medium tracking-wide text-white/80">
+        <div className="w-4 h-4 rounded-full bg-gradient-to-br from-sky-400 via-cyan-400 to-amber-300 shadow-[0_0_10px_rgba(14,165,233,0.5)]" />
+        <span className="text-[11px] font-semibold tracking-wide text-slate-700">
           QVideoChat
         </span>
-        <span className="text-[10px] text-white/30">
+        <span className="text-[10px] text-slate-400">
           v{process.env.NEXT_PUBLIC_APP_VERSION || "dev"}
         </span>
       </div>
@@ -140,11 +140,11 @@ function TitleBarButton({
   children: React.ReactNode;
 }) {
   const base =
-    "flex items-center justify-center w-11 h-full text-white/70 transition-colors";
+    "flex items-center justify-center w-11 h-full text-slate-500 transition-colors";
   const hover =
     variant === "danger"
-      ? "hover:bg-red-600/80 hover:text-white"
-      : "hover:bg-white/10 hover:text-white";
+      ? "hover:bg-rose-500 hover:text-white"
+      : "hover:bg-slate-900/10 hover:text-slate-900";
   return (
     <button
       type="button"

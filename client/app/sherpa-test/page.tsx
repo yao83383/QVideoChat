@@ -99,7 +99,7 @@ export default function SherpaTest() {
   const mb = (n: number) => (n / 1024 / 1024).toFixed(1);
 
   return (
-    <main className="min-h-screen bg-neutral-950 text-neutral-100 p-6">
+    <main className="qv-dark-surface min-h-screen p-6">
       <div className="max-w-3xl mx-auto space-y-4">
         <div>
           <h1 className="text-2xl font-bold">Sherpa-onnx ASR 测试</h1>

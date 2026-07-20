@@ -41,7 +41,7 @@ export default function TagSelector({ selected, onChange }: Props) {
     <div className="flex flex-col items-center gap-2">
       <button
         onClick={() => setExpanded(!expanded)}
-        className="flex items-center gap-1.5 text-xs text-neutral-400 hover:text-neutral-300 transition"
+        className="flex items-center gap-1.5 text-xs text-slate-600 hover:text-slate-700 transition"
       >
         <span>
           {selected.length > 0
@@ -59,7 +59,7 @@ export default function TagSelector({ selected, onChange }: Props) {
         <div className="flex flex-col gap-3 w-full max-w-80">
           {categories.map((cat) => (
             <div key={cat}>
-              <p className="text-[10px] text-neutral-500 mb-1.5">{cat}</p>
+              <p className="text-[10px] text-slate-500 mb-1.5">{cat}</p>
               <div className="flex flex-wrap gap-1.5">
                 {allTags
                   .filter((t) => t.category === cat)
@@ -71,8 +71,8 @@ export default function TagSelector({ selected, onChange }: Props) {
                         onClick={() => toggle(tag.name)}
                         className={`rounded-full px-3 py-1 text-xs border transition ${
                           active
-                            ? "bg-white text-black border-white"
-                            : "bg-neutral-800 text-neutral-300 border-neutral-700 hover:border-neutral-500"
+                            ? "bg-sky-500 text-white border-sky-500 shadow shadow-sky-500/30"
+                            : "bg-slate-100 text-slate-700 border-slate-300 hover:border-sky-400"
                         }`}
                       >
                         {tag.emoji} {tag.name}
@@ -83,7 +83,7 @@ export default function TagSelector({ selected, onChange }: Props) {
             </div>
           ))}
           {selected.length >= 3 && (
-            <p className="text-[10px] text-yellow-500">最多选择 3 个标签</p>
+            <p className="text-[10px] text-amber-700">最多选择 3 个标签</p>
           )}
         </div>
       )}

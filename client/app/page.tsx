@@ -302,7 +302,7 @@ export default function Home() {
   if (userLoading) {
     return (
       <main className="flex min-h-screen flex-col items-center justify-center">
-        <div className="h-8 w-8 animate-spin rounded-full border-2 border-neutral-600 border-t-white" />
+        <div className="h-8 w-8 animate-spin rounded-full border-2 border-slate-300 border-t-sky-600" />
       </main>
     );
   }
@@ -328,12 +328,12 @@ export default function Home() {
       </div>
 
       {friendRequest && (
-        <div className="fixed top-4 left-1/2 -translate-x-1/2 z-40 bg-neutral-800 border border-neutral-600 rounded-xl px-4 py-3 shadow-lg flex items-center gap-3">
-          <span className="text-sm text-neutral-200">
-            <span className="font-medium">{friendRequest.fromUsername}</span> 请求加你为好友
+        <div className="fixed top-4 left-1/2 -translate-x-1/2 z-40 bg-white/95 backdrop-blur-md border border-sky-200 rounded-xl px-4 py-3 shadow-lg shadow-sky-500/10 flex items-center gap-3">
+          <span className="text-sm text-slate-700">
+            <span className="font-medium text-slate-900">{friendRequest.fromUsername}</span> 请求加你为好友
           </span>
           <button
-            className="rounded-lg bg-white text-black px-3 py-1 text-xs font-medium"
+            className="rounded-lg bg-gradient-to-r from-sky-500 to-cyan-500 hover:from-sky-600 hover:to-cyan-600 text-white px-3 py-1 text-xs font-medium shadow shadow-sky-500/30"
             onClick={() => {
               if (!user?.isRegistered) { setShowLoginModal(true); return; }
               socketRef.current?.emit("friend:accept", {
@@ -346,7 +346,7 @@ export default function Home() {
             接受
           </button>
           <button
-            className="text-xs text-neutral-400 hover:text-white"
+            className="text-xs text-slate-500 hover:text-slate-800"
             onClick={() => setFriendRequest(null)}
           >
             忽略
@@ -356,28 +356,28 @@ export default function Home() {
 
       {/* Compact brand */}
       <div className="flex flex-col items-center gap-1 mt-2">
-        <h1 className="text-2xl font-bold tracking-tight">QVideoChat</h1>
-        <p className="text-neutral-500 text-[11px]">以你想要的样子,遇见世界</p>
+        <h1 className="text-2xl font-bold tracking-tight text-slate-900">QVideoChat</h1>
+        <p className="text-slate-500 text-[11px]">以你想要的样子,遇见世界</p>
       </div>
 
       {/* Avatar-preview banner */}
       {showAvatarBanner && (
-        <div className="w-full max-w-sm flex items-center gap-2 rounded-full bg-gradient-to-r from-sky-500/15 to-cyan-500/15 border border-sky-500/25 pl-4 pr-2 py-1.5">
+        <div className="w-full max-w-sm flex items-center gap-2 rounded-full bg-gradient-to-r from-sky-100 to-cyan-100 border border-sky-300 pl-4 pr-2 py-1.5 shadow-sm">
           <button
             type="button"
             onClick={openAvatarPage}
-            className="flex-1 flex items-center gap-2 text-xs text-neutral-200 hover:text-white transition"
+            className="flex-1 flex items-center gap-2 text-xs text-slate-700 hover:text-slate-900 transition"
           >
             <span>✨</span>
-            <span className="font-medium">换个化身试试</span>
-            <span className="text-neutral-400">{FEATURED_BANNER_NAMES}</span>
-            <span className="ml-auto text-neutral-400">→</span>
+            <span className="font-semibold">换个化身试试</span>
+            <span className="text-slate-500">{FEATURED_BANNER_NAMES}</span>
+            <span className="ml-auto text-sky-600">→</span>
           </button>
           <button
             type="button"
             onClick={dismissAvatarBanner}
             aria-label="关闭"
-            className="w-6 h-6 rounded-full text-neutral-500 hover:text-white hover:bg-white/10 transition text-xs"
+            className="w-6 h-6 rounded-full text-slate-500 hover:text-slate-900 hover:bg-slate-900/10 transition text-xs"
           >
             ×
           </button>
@@ -385,9 +385,9 @@ export default function Home() {
       )}
 
       {!isConnected && matchStatus === "idle" && (
-        <div className="flex items-center gap-2 rounded-full bg-red-900/20 border border-red-800/50 px-3 py-1">
-          <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
-          <span className="text-xs text-red-400">服务器未连接</span>
+        <div className="flex items-center gap-2 rounded-full bg-rose-100 border border-rose-300 px-3 py-1">
+          <span className="w-2 h-2 rounded-full bg-rose-500 animate-pulse" />
+          <span className="text-xs text-rose-700 font-medium">服务器未连接</span>
         </div>
       )}
 
@@ -403,35 +403,35 @@ export default function Home() {
           mirror
         />
         <div className="min-h-[28px] flex items-center justify-center text-xs text-center">
-          {error && <span className="text-red-400">{error}</span>}
+          {error && <span className="text-rose-600 font-medium">{error}</span>}
           {!error && step && !isLoaded && (
-            <span className="text-yellow-400">加载中: {step}</span>
+            <span className="text-amber-600 font-medium">加载中: {step}</span>
           )}
           {!error && isLoaded && !faceFound && (
-            <span className="text-yellow-500">追踪就绪 · 未检测到人脸</span>
+            <span className="text-amber-700 font-medium">追踪就绪 · 未检测到人脸</span>
           )}
           {!error && faceFound && (
-            <span className="text-green-500">追踪中</span>
+            <span className="text-emerald-600 font-medium">追踪中</span>
           )}
           {!error && !isLoaded && !step && (
             <button
               onClick={toggleCamera}
-              className="inline-flex items-center gap-2 rounded-full bg-white/10 hover:bg-white/20 border border-white/25 hover:border-white/50 px-3.5 py-1 text-[11px] text-neutral-100 shadow-sm transition"
+              className="inline-flex items-center gap-2 rounded-full bg-white hover:bg-sky-50 border border-sky-200 hover:border-sky-400 px-3.5 py-1 text-[11px] text-slate-700 shadow-sm transition"
             >
               <span aria-hidden>📷</span>
               <span>打开摄像头,让化身跟着你笑</span>
-              <span className="text-neutral-400" aria-hidden>→</span>
+              <span className="text-sky-500" aria-hidden>→</span>
             </button>
           )}
         </div>
         <button
           type="button"
           onClick={openAvatarFromHero}
-          className="group inline-flex items-center gap-1.5 rounded-full border border-white/10 hover:border-white/30 bg-white/5 hover:bg-white/10 px-3 py-1 text-[11px] text-neutral-300 transition"
+          className="group inline-flex items-center gap-1.5 rounded-full border border-slate-200 hover:border-sky-400 bg-white/80 hover:bg-white px-3 py-1 text-[11px] text-slate-700 transition shadow-sm"
         >
-          <span className="text-neutral-500">化身</span>
-          <span className="font-medium text-neutral-100">{selectedEntry.name}</span>
-          <span className="text-sky-300 group-hover:text-sky-200">换一换 →</span>
+          <span className="text-slate-500">化身</span>
+          <span className="font-medium text-slate-900">{selectedEntry.name}</span>
+          <span className="text-sky-600 group-hover:text-sky-700">换一换 →</span>
         </button>
       </div>
 
@@ -441,22 +441,22 @@ export default function Home() {
       <button
         type="button"
         onClick={() => setShowProfile(true)}
-        className="group flex flex-col items-center gap-0.5 max-w-sm px-4 py-1.5 rounded-2xl bg-white/[0.03] hover:bg-white/[0.06] border border-white/5 hover:border-white/15 transition"
+        className="group flex flex-col items-center gap-0.5 max-w-sm px-4 py-1.5 rounded-2xl bg-white/70 hover:bg-white border border-slate-200 hover:border-sky-300 shadow-sm transition"
       >
-        <span className="text-[13px] text-neutral-100 font-medium truncate max-w-full">
+        <span className="text-[13px] text-slate-900 font-semibold truncate max-w-full">
           {user?.isRegistered ? `@${user.username}` : (activeName || "抽取中…")}
         </span>
-        <span className="text-[10px] text-neutral-500 flex items-center gap-2 whitespace-nowrap">
+        <span className="text-[10px] text-slate-500 flex items-center gap-2 whitespace-nowrap">
           <span>
             {LANG_LABEL[langs.sl] || langs.sl} → {LANG_LABEL[langs.tl] || langs.tl}
           </span>
-          <span className="text-neutral-700">·</span>
+          <span className="text-slate-300">·</span>
           <span>
             {selectedTags.length > 0
               ? `${selectedTags.length} 个标签`
               : "未选标签"}
           </span>
-          <span className="text-sky-300 group-hover:text-sky-200 ml-1">
+          <span className="text-sky-600 group-hover:text-sky-700 ml-1">
             编辑 →
           </span>
         </span>
@@ -467,14 +467,14 @@ export default function Home() {
         <button
           onClick={handleMatch}
           disabled={!activeName || !isConnected}
-          className="w-full max-w-xs rounded-2xl bg-gradient-to-r from-sky-400 via-cyan-400 to-emerald-500 hover:from-sky-500 hover:via-cyan-500 hover:to-emerald-600 px-8 py-3.5 text-base font-semibold shadow-xl shadow-emerald-500/25 disabled:opacity-40 disabled:cursor-not-allowed disabled:shadow-none transition"
+          className="w-full max-w-xs rounded-2xl bg-gradient-to-r from-sky-400 via-cyan-400 to-amber-400 hover:from-sky-500 hover:via-cyan-500 hover:to-amber-500 text-white px-8 py-3.5 text-base font-semibold shadow-xl shadow-amber-500/30 disabled:opacity-40 disabled:cursor-not-allowed disabled:shadow-none transition"
         >
           开始聊天
         </button>
       ) : (
         <div className="flex flex-col items-center gap-3">
-          <div className="h-6 w-6 animate-spin rounded-full border-2 border-neutral-600 border-t-white" />
-          <p className="text-neutral-400 text-sm">正在为你连线聊伴…</p>
+          <div className="h-6 w-6 animate-spin rounded-full border-2 border-slate-300 border-t-sky-600" />
+          <p className="text-slate-600 text-sm">正在为你连线聊伴…</p>
           <MatchButton
             label="取消"
             variant="secondary"
@@ -483,9 +483,9 @@ export default function Home() {
         </div>
       )}
 
-      {banMsg && <p className="text-red-400 text-sm">{banMsg}</p>}
+      {banMsg && <p className="text-rose-600 text-sm font-medium">{banMsg}</p>}
 
-      <p className="text-neutral-700 text-[10px] mt-auto pt-4">
+      <p className="text-slate-400 text-[10px] mt-auto pt-4">
         v{process.env.NEXT_PUBLIC_APP_VERSION || "0.0.0"}
       </p>
 

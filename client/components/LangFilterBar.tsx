@@ -72,9 +72,9 @@ export default function LangFilterBar({ onChange }: Props) {
 
   return (
     <div className="w-full max-w-sm flex flex-col gap-2">
-      <p className="text-[10px] text-neutral-500 tracking-widest text-center uppercase">匹配语言偏好</p>
+      <p className="text-[10px] text-slate-500 tracking-widest text-center uppercase">匹配语言偏好</p>
       <div className="flex items-center gap-2">
-        <span className="text-[10px] text-neutral-500 w-8 shrink-0">我说</span>
+        <span className="text-[10px] text-slate-500 w-8 shrink-0">我说</span>
         <div className="flex flex-wrap gap-1.5 justify-center flex-1">
           {LANGS.map((l) => (
             <button
@@ -83,8 +83,8 @@ export default function LangFilterBar({ onChange }: Props) {
               onClick={() => pickSl(l.code)}
               className={`rounded-lg px-2.5 py-1 text-xs font-medium transition ${
                 sl === l.code
-                  ? "bg-sky-600 text-white shadow-md shadow-sky-600/30"
-                  : "bg-neutral-800 text-neutral-400 hover:bg-neutral-700 border border-neutral-700"
+                  ? "bg-sky-600 text-slate-900 shadow-md shadow-sky-600/30"
+                  : "bg-slate-100 text-slate-600 hover:bg-slate-200 border border-slate-300"
               }`}
               title={l.label}
             >
@@ -94,7 +94,7 @@ export default function LangFilterBar({ onChange }: Props) {
         </div>
       </div>
       <div className="flex items-center gap-2">
-        <span className="text-[10px] text-neutral-500 w-8 shrink-0">对方</span>
+        <span className="text-[10px] text-slate-500 w-8 shrink-0">对方</span>
         <div className="flex flex-wrap gap-1.5 justify-center flex-1">
           {LANGS.map((l) => {
             const disabled = l.code === sl;
@@ -106,10 +106,10 @@ export default function LangFilterBar({ onChange }: Props) {
                 disabled={disabled}
                 className={`rounded-lg px-2.5 py-1 text-xs font-medium transition ${
                   tl === l.code && !disabled
-                    ? "bg-cyan-600 text-white shadow-md shadow-cyan-600/30"
+                    ? "bg-cyan-600 text-slate-900 shadow-md shadow-cyan-600/30"
                     : disabled
-                    ? "bg-neutral-900 text-neutral-700 border border-neutral-800 cursor-not-allowed"
-                    : "bg-neutral-800 text-neutral-400 hover:bg-neutral-700 border border-neutral-700"
+                    ? "bg-white text-slate-300 border border-slate-200 cursor-not-allowed"
+                    : "bg-slate-100 text-slate-600 hover:bg-slate-200 border border-slate-300"
                 }`}
                 title={disabled ? "不能和我说的一样" : l.label}
               >

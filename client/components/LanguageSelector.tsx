@@ -56,7 +56,7 @@ export default function LanguageSelector({
         className={`flex items-center gap-1 rounded-full px-3 py-1 text-xs transition ${
           subtitleEnabled
             ? "bg-sky-700/40 border border-sky-600 text-sky-300"
-            : "bg-neutral-800 border border-neutral-700 text-neutral-500"
+            : "bg-slate-100 border border-slate-300 text-slate-500"
         }`}
         title={subtitleEnabled ? "关闭 AI 字幕" : "开启 AI 字幕"}
       >
@@ -69,16 +69,16 @@ export default function LanguageSelector({
           {/* Language pair selector */}
           <button
             onClick={() => setOpen(!open)}
-            className="flex items-center gap-1 rounded-full bg-neutral-800 border border-neutral-700 px-2 py-1 text-xs text-neutral-300 hover:border-neutral-500 transition"
+            className="flex items-center gap-1 rounded-full bg-slate-100 border border-slate-300 px-2 py-1 text-xs text-slate-700 hover:border-sky-400 transition"
           >
             <span>{sourceLabel.flag}</span>
-            <span className="text-neutral-500">→</span>
+            <span className="text-slate-500">→</span>
             <span>{targetLabel.flag}</span>
           </button>
 
           {open && (
-            <div className="absolute top-full mt-2 left-0 bg-neutral-850 border border-neutral-700 rounded-xl p-3 shadow-xl z-50 min-w-[200px]">
-              <p className="text-[10px] text-neutral-500 mb-2">我的语言</p>
+            <div className="absolute top-full mt-2 left-0 bg-white border border-slate-300 rounded-xl p-3 shadow-xl z-50 min-w-[200px]">
+              <p className="text-[10px] text-slate-500 mb-2">我的语言</p>
               <div className="flex gap-1 flex-wrap mb-3">
                 {LANGUAGES.map((l) => (
                   <button
@@ -87,14 +87,14 @@ export default function LanguageSelector({
                     className={`flex items-center gap-1 rounded-lg px-2 py-1 text-xs transition ${
                       sourceLang === l.code
                         ? "bg-sky-700/30 border border-sky-600 text-sky-300"
-                        : "bg-neutral-800 border border-neutral-700 text-neutral-400 hover:border-neutral-500"
+                        : "bg-slate-100 border border-slate-300 text-slate-600 hover:border-sky-400"
                     }`}
                   >
                     {l.flag} {l.label}
                   </button>
                 ))}
               </div>
-              <p className="text-[10px] text-neutral-500 mb-2">翻译为</p>
+              <p className="text-[10px] text-slate-500 mb-2">翻译为</p>
               <div className="flex gap-1 flex-wrap">
                 {LANGUAGES.filter((l) => l.code !== sourceLang).map((l) => (
                   <button
@@ -103,7 +103,7 @@ export default function LanguageSelector({
                     className={`flex items-center gap-1 rounded-lg px-2 py-1 text-xs transition ${
                       targetLang === l.code
                         ? "bg-green-700/30 border border-green-600 text-green-300"
-                        : "bg-neutral-800 border border-neutral-700 text-neutral-400 hover:border-neutral-500"
+                        : "bg-slate-100 border border-slate-300 text-slate-600 hover:border-sky-400"
                     }`}
                   >
                     {l.flag} {l.label}

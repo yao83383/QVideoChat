@@ -692,9 +692,9 @@ export default function RoomClient() {
   if (!isLoaded && !cameraEverLoaded.current && !camError) {
     return (
       <main className="flex min-h-screen flex-col items-center justify-center gap-4">
-        <div className="h-8 w-8 animate-spin rounded-full border-2 border-neutral-600 border-t-white" />
-        <p className="text-neutral-400 text-sm">初始化摄像头...</p>
-        {camStep && <p className="text-yellow-400 text-xs">阶段: {camStep}</p>}
+        <div className="h-8 w-8 animate-spin rounded-full border-2 border-slate-300 border-t-sky-600" />
+        <p className="text-slate-600 text-sm">初始化摄像头...</p>
+        {camStep && <p className="text-amber-600 text-xs">阶段: {camStep}</p>}
       </main>
     );
   }
@@ -702,37 +702,37 @@ export default function RoomClient() {
   return (
     <main className="flex min-h-screen flex-col items-center justify-center gap-4 p-4">
       <audio ref={audioRef} autoPlay playsInline hidden />
-      <h1 className="text-xl font-bold tracking-tight">QVideoChat</h1>
+      <h1 className="text-xl font-bold tracking-tight text-slate-900">QVideoChat</h1>
 
       {partnerLeft && !searching && (
-        <p className="rounded-lg bg-yellow-900/30 px-4 py-2 text-yellow-400 text-sm">对方已离开房间</p>
+        <p className="rounded-lg bg-amber-100 border border-amber-300 px-4 py-2 text-amber-800 text-sm font-medium">对方已离开房间</p>
       )}
       {searching && (
-        <div className="flex items-center gap-3 rounded-lg bg-blue-900/30 px-4 py-2 text-blue-400 text-sm">
-          <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-blue-500 border-t-transparent" />
+        <div className="flex items-center gap-3 rounded-lg bg-sky-100 border border-sky-300 px-4 py-2 text-sky-700 text-sm font-medium">
+          <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-sky-500 border-t-transparent" />
           <span>正在为你寻找下一位聊天对象...</span>
         </div>
       )}
       {partnerReconnecting && !partnerLeft && (
-        <p className="rounded-lg bg-blue-900/30 px-4 py-2 text-blue-400 text-sm">对方连接中断，等待重连...</p>
+        <p className="rounded-lg bg-sky-100 border border-sky-300 px-4 py-2 text-sky-700 text-sm font-medium">对方连接中断，等待重连...</p>
       )}
       {peer.error && (
         peer.error.includes("Permission denied") || peer.error.includes("NotAllowedError") ? (
-          <div className="rounded-lg bg-red-900/40 border border-red-700 px-4 py-3 text-sm max-w-lg">
-            <p className="font-medium text-red-300 mb-1">🎤 麦克风权限被拒绝</p>
-            <p className="text-red-200/80 text-xs leading-relaxed">
+          <div className="rounded-lg bg-rose-50 border border-rose-300 px-4 py-3 text-sm max-w-lg">
+            <p className="font-semibold text-rose-700 mb-1">🎤 麦克风权限被拒绝</p>
+            <p className="text-rose-600/90 text-xs leading-relaxed">
               浏览器阻止了麦克风访问,双方无法通话。请点击浏览器地址栏左侧的 🔒 锁形图标 → 麦克风 → 改为"允许",然后刷新页面。
             </p>
           </div>
         ) : (
-          <p className="text-red-400 text-sm">{peer.error}</p>
+          <p className="text-rose-600 text-sm font-medium">{peer.error}</p>
         )
       )}
 
       {topicText && <TopicCard text={topicText} category={topicCategory} />}
 
       {friendStatus === "received" && !partnerLeft && (
-        <p className="rounded-lg bg-green-900/30 px-4 py-2 text-green-400 text-xs">{pname} 想加你为好友</p>
+        <p className="rounded-lg bg-emerald-100 border border-emerald-300 px-4 py-2 text-emerald-700 text-xs font-medium">{pname} 想加你为好友</p>
       )}
 
       <div className="flex flex-col md:flex-row items-center md:items-start gap-4 md:gap-6 w-full max-w-xl md:max-w-none px-2">
@@ -750,8 +750,8 @@ export default function RoomClient() {
               onConfigChange={handleMyConfigChange}
             />
           ) : (
-            <div className="rounded-2xl bg-neutral-950 flex items-center justify-center" style={{ width: 260, height: 260 }}>
-              <span className="text-neutral-600 text-5xl">📷</span>
+            <div className="qv-dark-surface rounded-2xl flex items-center justify-center border border-white/10" style={{ width: 260, height: 260 }}>
+              <span className="text-white/40 text-5xl">📷</span>
             </div>
           )}
           <VoiceStatus stream={peer.localAudioStream} label={getSettings().showId ? `${uname} (你)` : "匿名用户"} />
@@ -858,11 +858,11 @@ export default function RoomClient() {
              * stable. VoiceStatus below already switches to a "寻找中..." label.
              */
             <div
-              className="rounded-2xl bg-neutral-950 border border-neutral-800 flex flex-col items-center justify-center gap-3"
+              className="qv-dark-surface rounded-2xl border border-white/10 flex flex-col items-center justify-center gap-3"
               style={{ width: 260, height: 260 }}
             >
-              <div className="h-8 w-8 animate-spin rounded-full border-2 border-neutral-700 border-t-neutral-300" />
-              <span className="text-neutral-500 text-xs">等待接入</span>
+              <div className="h-8 w-8 animate-spin rounded-full border-2 border-white/20 border-t-white/70" />
+              <span className="text-white/60 text-xs">等待接入</span>
             </div>
           ) : (
             <VrmAvatar
@@ -875,7 +875,7 @@ export default function RoomClient() {
             />
           )}
           {searching || !roomId ? (
-            <span className="text-xs text-neutral-500">寻找中...</span>
+            <span className="text-xs text-slate-500">寻找中...</span>
           ) : (
             <VoiceStatus stream={peer.remoteAudioStream} label={`${pname} (对方)`} muted={partnerLeft} />
           )}
@@ -907,12 +907,12 @@ export default function RoomClient() {
       </div>
 
       <div className="flex items-center gap-3">
-        <span className={`text-xs ${peer.isConnected ? "text-green-400" : "text-neutral-500"}`}>
+        <span className={`text-xs font-medium ${peer.isConnected ? "text-emerald-600" : "text-slate-500"}`}>
           {peer.isConnecting ? "连接中..." : peer.isConnected ? "已连接" : roomReady ? "建立连接..." : "等待对方加入..."}
         </span>
-        <span className="text-xs text-neutral-600">ICE: {peer.iceState}</span>
+        <span className="text-xs text-slate-400">ICE: {peer.iceState}</span>
         {!faceFound && isLoaded && (
-          <span className="text-xs text-yellow-400">未检测到人脸</span>
+          <span className="text-xs text-amber-600 font-medium">未检测到人脸</span>
         )}
       </div>
 
@@ -925,10 +925,10 @@ export default function RoomClient() {
           title={camError ? "未授权,点击尝试授权" : isCameraOn ? "关闭摄像头" : "打开摄像头"}
           className={`relative w-9 h-9 rounded-full flex items-center justify-center text-sm transition ${
             isCameraOn
-              ? "bg-neutral-800 border border-neutral-600 text-neutral-300 hover:bg-neutral-700"
+              ? "bg-white border border-slate-300 text-slate-700 hover:border-sky-400 hover:text-sky-600 shadow-sm"
               : camError
-              ? "bg-red-950/60 border-2 border-red-600 text-red-400/70 hover:bg-red-900/70"
-              : "bg-red-600/30 border border-red-700 text-red-400"
+              ? "bg-rose-100 border-2 border-rose-400 text-rose-700 hover:bg-rose-200"
+              : "bg-rose-50 border border-rose-300 text-rose-600"
           }`}>
           <span aria-hidden>📷</span>
           {/* Red slash overlay marks "explicitly denied / errored" — visually
@@ -936,7 +936,7 @@ export default function RoomClient() {
               can retry the browser permission grant. */}
           {!isCameraOn && camError && (
             <span
-              className="absolute inset-0 flex items-center justify-center text-base font-bold text-red-500 pointer-events-none"
+              className="absolute inset-0 flex items-center justify-center text-base font-bold text-rose-600 pointer-events-none"
               aria-hidden
             >
               ✕
@@ -947,7 +947,7 @@ export default function RoomClient() {
           onClick={peer.toggleMic}
           title={peer.isMicOn ? "静音" : "取消静音"}
           className={`w-9 h-9 rounded-full flex items-center justify-center text-sm transition ${
-            peer.isMicOn ? "bg-neutral-800 border border-neutral-600 text-neutral-300 hover:bg-neutral-700" : "bg-red-600/30 border border-red-700 text-red-400"
+            peer.isMicOn ? "bg-white border border-slate-300 text-slate-700 hover:border-sky-400 hover:text-sky-600 shadow-sm" : "bg-rose-50 border border-rose-300 text-rose-600"
           }`}>
           🎙
         </button>
@@ -967,41 +967,41 @@ export default function RoomClient() {
       </div>
 
       {peer.isConnected && (
-        <p className="text-xs text-green-400/60">语音已连接</p>
+        <p className="text-xs text-emerald-600/80 font-medium">语音已连接</p>
       )}
 
       {peer.isConnected && friendStatus === "none" && (
         <button onClick={handleAddFriend}
-          className="rounded-lg bg-neutral-800 border border-neutral-700 px-4 py-1.5 text-xs text-neutral-300 hover:border-neutral-500 hover:text-white transition">
+          className="rounded-lg bg-white border border-slate-300 px-4 py-1.5 text-xs text-slate-700 hover:border-sky-400 hover:text-sky-600 transition shadow-sm">
           + 添加好友
         </button>
       )}
 
       {peer.isConnected && friendStatus === "received" && (
         <button onClick={handleAcceptFriend}
-          className="rounded-lg bg-green-700 px-4 py-1.5 text-xs text-white hover:bg-green-600">
+          className="rounded-lg bg-gradient-to-r from-emerald-500 to-emerald-600 hover:from-emerald-600 hover:to-emerald-700 px-4 py-1.5 text-xs text-white font-semibold shadow shadow-emerald-500/30 transition">
           接受好友请求
         </button>
       )}
 
       {friendStatus === "sent" && (
-        <p className="text-xs text-neutral-500">好友请求已发送</p>
+        <p className="text-xs text-slate-500">好友请求已发送</p>
       )}
 
       {friendStatus === "friends" && (
-        <p className="text-xs text-green-400">已是好友</p>
+        <p className="text-xs text-emerald-600 font-medium">已是好友</p>
       )}
 
       {showFriendPrompt && partnerLeft && (
-        <div className="flex items-center gap-3 rounded-lg bg-neutral-800/60 px-4 py-3">
-          <span className="text-xs text-neutral-400">聊得开心吗？</span>
+        <div className="flex items-center gap-3 rounded-lg bg-white/80 border border-sky-200 shadow-sm px-4 py-3">
+          <span className="text-xs text-slate-600">聊得开心吗？</span>
           {friendStatus === "none" && (
-            <button onClick={handleAddFriend} className="rounded-lg bg-white text-black px-3 py-1 text-xs font-medium hover:bg-neutral-200">
+            <button onClick={handleAddFriend} className="rounded-lg bg-gradient-to-r from-sky-500 to-cyan-500 hover:from-sky-600 hover:to-cyan-600 text-white px-3 py-1 text-xs font-semibold shadow-sm shadow-sky-500/30">
               加为好友
             </button>
           )}
-          {friendStatus === "sent" && <span className="text-xs text-green-400">已发送</span>}
-          {friendStatus === "friends" && <span className="text-xs text-green-400">已是好友</span>}
+          {friendStatus === "sent" && <span className="text-xs text-emerald-600 font-medium">已发送</span>}
+          {friendStatus === "friends" && <span className="text-xs text-emerald-600 font-medium">已是好友</span>}
         </div>
       )}
 
@@ -1013,11 +1013,11 @@ export default function RoomClient() {
 
       <div className="flex gap-4 mt-2">
         <button onClick={handleHangup}
-          className="rounded-lg bg-neutral-800 border border-neutral-700 px-4 py-2 text-sm text-neutral-300 hover:border-red-600 hover:text-red-400 transition">
+          className="rounded-lg bg-white border border-slate-300 px-4 py-2 text-sm text-slate-700 hover:border-rose-400 hover:text-rose-600 transition shadow-sm">
           回主页
         </button>
         <button onClick={handleNext} disabled={searching}
-          className="rounded-lg bg-white text-black px-4 py-2 text-sm font-medium hover:bg-neutral-200 transition disabled:opacity-40 disabled:cursor-not-allowed">
+          className="rounded-lg bg-gradient-to-r from-sky-500 to-cyan-500 hover:from-sky-600 hover:to-cyan-600 text-white px-4 py-2 text-sm font-semibold shadow-lg shadow-sky-500/30 transition disabled:opacity-40 disabled:cursor-not-allowed">
           {searching ? "寻找中..." : "下一个"}
         </button>
         {!reported && (
@@ -1025,14 +1025,14 @@ export default function RoomClient() {
             type="button"
             onClick={() => setShowReport(true)}
             title="举报当前对方"
-            className="flex items-center gap-1.5 rounded-lg bg-red-950/40 border border-red-800/60 hover:bg-red-900/50 hover:border-red-600 text-red-300 hover:text-red-100 px-3 py-2 text-xs font-medium transition"
+            className="flex items-center gap-1.5 rounded-lg bg-rose-50 border border-rose-300 hover:bg-rose-100 hover:border-rose-400 text-rose-700 hover:text-rose-800 px-3 py-2 text-xs font-medium transition"
           >
             <span>🚨</span>
             <span>举报</span>
           </button>
         )}
         {reported && (
-          <span className="rounded-lg bg-neutral-800/70 border border-neutral-700 px-3 py-2 text-xs text-neutral-500">
+          <span className="rounded-lg bg-white/80 border border-slate-200 px-3 py-2 text-xs text-slate-500">
             已举报,已加入黑名单
           </span>
         )}

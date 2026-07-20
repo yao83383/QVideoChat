@@ -46,8 +46,8 @@ export default function PendingInvitationsPanel() {
 
   if (loading) {
     return (
-      <div className="w-full max-w-sm rounded-xl bg-neutral-900/50 border border-neutral-800 p-4 text-center">
-        <div className="text-neutral-500 text-xs">加载待处理邀请中…</div>
+      <div className="w-full max-w-sm rounded-xl bg-white/50 border border-slate-200 p-4 text-center">
+        <div className="text-slate-500 text-xs">加载待处理邀请中…</div>
       </div>
     );
   }
@@ -61,7 +61,7 @@ export default function PendingInvitationsPanel() {
           <span className="w-2 h-2 rounded-full bg-sky-400 animate-pulse" />
           待处理邀请 ({list.length})
         </h3>
-        <span className="text-[10px] text-neutral-500">2 分钟内回应</span>
+        <span className="text-[10px] text-slate-500">2 分钟内回应</span>
       </div>
 
       {list.map((inv) => {
@@ -70,13 +70,13 @@ export default function PendingInvitationsPanel() {
         void tick;
         const contact = inv.email || inv.phone || "-";
         return (
-          <div key={inv.guestUserId} className="rounded-xl bg-neutral-900 border border-white/5 p-3 flex flex-col gap-2">
+          <div key={inv.guestUserId} className="rounded-xl bg-white border border-slate-200 p-3 flex flex-col gap-2">
             <div className="flex items-baseline justify-between">
               <div className="flex flex-col">
                 <span className="text-sm font-medium">{inv.guestUsername}</span>
-                <span className="text-[10px] text-neutral-500 font-mono">{contact}</span>
+                <span className="text-[10px] text-slate-500 font-mono">{contact}</span>
               </div>
-              <span className={`text-xs font-mono tabular-nums ${remaining < 30 ? "text-red-400" : "text-neutral-400"}`}>
+              <span className={`text-xs font-mono tabular-nums ${remaining < 30 ? "text-rose-600" : "text-slate-600"}`}>
                 {String(Math.floor(remaining / 60))}:{String(remaining % 60).padStart(2, "0")}
               </span>
             </div>
@@ -85,7 +85,7 @@ export default function PendingInvitationsPanel() {
                 type="button"
                 onClick={() => handleAction(inv.guestUserId, "reject")}
                 disabled={busy === inv.guestUserId}
-                className="flex-1 rounded-lg bg-neutral-800 hover:bg-neutral-700 border border-neutral-700 py-1.5 text-xs text-neutral-300 hover:text-white disabled:opacity-40 transition"
+                className="flex-1 rounded-lg bg-slate-100 hover:bg-slate-200 border border-slate-300 py-1.5 text-xs text-slate-700 hover:text-white disabled:opacity-40 transition"
               >
                 拒绝
               </button>

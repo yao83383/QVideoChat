@@ -238,7 +238,7 @@ export default function AudioTest() {
   const shareLink = shareUrl && inputRoom ? `${shareUrl}?room=${inputRoom}` : "";
 
   return (
-    <main className="min-h-screen bg-black text-white p-4 font-mono">
+    <main className="qv-dark-surface min-h-screen p-4 font-mono">
       <audio ref={audioRef} autoPlay playsInline hidden />
       <div className="max-w-2xl mx-auto space-y-4">
         <div>

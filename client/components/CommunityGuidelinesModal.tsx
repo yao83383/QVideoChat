@@ -58,57 +58,57 @@ export default function CommunityGuidelinesModal({ onAccept }: Props) {
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/90 backdrop-blur-sm flex items-center justify-center px-4 py-8 overflow-y-auto">
-      <div className="w-full max-w-md rounded-3xl bg-neutral-900 border border-white/10 p-6 flex flex-col gap-5">
+    <div className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-sm flex items-center justify-center px-4 py-8 overflow-y-auto">
+      <div className="w-full max-w-md rounded-3xl bg-white border border-slate-200 p-6 flex flex-col gap-5">
         <div className="text-center">
           <div className="text-4xl mb-2">🌏</div>
           <h2 className="text-xl font-bold">欢迎来到 QVideoChat</h2>
-          <p className="text-neutral-200 text-sm mt-2 font-medium tracking-wide">
+          <p className="text-slate-800 text-sm mt-2 font-medium tracking-wide">
             以你想要的样子,遇见世界
           </p>
-          <p className="text-neutral-500 text-[10px] mt-1.5">
+          <p className="text-slate-500 text-[10px] mt-1.5">
             练语言 · 交朋友 · 见世界 · 一起成长
           </p>
         </div>
 
         <div className="space-y-3 text-sm">
-          <div className="flex items-start gap-3 rounded-xl bg-white/[0.03] border border-white/10 p-3">
+          <div className="flex items-start gap-3 rounded-xl bg-white/[0.03] border border-slate-200 p-3">
             <span className="text-lg shrink-0">🤝</span>
             <div>
-              <p className="font-medium text-neutral-100">尊重每一位新朋友</p>
-              <p className="text-neutral-500 text-xs mt-0.5">
+              <p className="font-medium text-slate-900">尊重每一位新朋友</p>
+              <p className="text-slate-500 text-xs mt-0.5">
                 友善交流,不发表歧视、辱骂或骚扰性言论
               </p>
             </div>
           </div>
-          <div className="flex items-start gap-3 rounded-xl bg-white/[0.03] border border-white/10 p-3">
+          <div className="flex items-start gap-3 rounded-xl bg-white/[0.03] border border-slate-200 p-3">
             <span className="text-lg shrink-0">🗣️</span>
             <div>
-              <p className="font-medium text-neutral-100">开放式话题,鼓励练语言</p>
-              <p className="text-neutral-500 text-xs mt-0.5">
+              <p className="font-medium text-slate-900">开放式话题,鼓励练语言</p>
+              <p className="text-slate-500 text-xs mt-0.5">
                 聊兴趣、聊学习、聊各自的文化,让每一次相遇都有收获
               </p>
             </div>
           </div>
-          <div className="flex items-start gap-3 rounded-xl bg-white/[0.03] border border-white/10 p-3">
+          <div className="flex items-start gap-3 rounded-xl bg-white/[0.03] border border-slate-200 p-3">
             <span className="text-lg shrink-0">🛡️</span>
             <div>
-              <p className="font-medium text-neutral-100">遇到不当行为请举报</p>
-              <p className="text-neutral-500 text-xs mt-0.5">
+              <p className="font-medium text-slate-900">遇到不当行为请举报</p>
+              <p className="text-slate-500 text-xs mt-0.5">
                 通话中的"举报"按钮一键提交,我们会认真审核
               </p>
             </div>
           </div>
         </div>
 
-        <label className="flex items-start gap-3 rounded-xl bg-white/[0.02] border border-white/10 p-3 cursor-pointer hover:border-white/25 transition">
+        <label className="flex items-start gap-3 rounded-xl bg-white/[0.02] border border-slate-200 p-3 cursor-pointer hover:border-slate-200 transition">
           <input
             type="checkbox"
             checked={guidelinesOk}
             onChange={(e) => setGuidelinesOk(e.target.checked)}
             className="mt-0.5 w-4 h-4 rounded accent-sky-500"
           />
-          <span className="text-sm text-neutral-200 leading-tight">
+          <span className="text-sm text-slate-800 leading-tight">
             我已阅读并同意上述社区准则
           </span>
         </label>
@@ -119,8 +119,8 @@ export default function CommunityGuidelinesModal({ onAccept }: Props) {
           disabled={!guidelinesOk}
           className={`w-full rounded-2xl px-6 py-3 text-sm font-semibold transition ${
             guidelinesOk
-              ? "bg-gradient-to-r from-sky-400 via-cyan-400 to-emerald-500 hover:from-sky-500 hover:via-cyan-500 hover:to-emerald-600 text-white shadow-lg shadow-emerald-500/30"
-              : "bg-neutral-800 text-neutral-500 cursor-not-allowed border border-white/5"
+              ? "bg-gradient-to-r from-sky-400 via-cyan-400 to-amber-400 hover:from-sky-500 hover:via-cyan-500 hover:to-amber-500 text-white shadow-lg shadow-amber-500/30"
+              : "bg-slate-100 text-slate-500 cursor-not-allowed border border-slate-200"
           }`}
         >
           进入 QVideoChat

@@ -91,7 +91,7 @@ export default function OnboardingWizard({
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/90 backdrop-blur-sm flex flex-col items-center justify-center px-6 py-8 overflow-y-auto">
+    <div className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-sm flex flex-col items-center justify-center px-6 py-8 overflow-y-auto">
       {/* Step indicator: current is a wide bar, past are dots, upcoming are ghost dots */}
       <div className="flex items-center gap-2 mb-10">
         {[0, 1, 2].map((i) => (
@@ -114,7 +114,7 @@ export default function OnboardingWizard({
             <div className="text-center">
               <div className="text-5xl mb-3">🎯</div>
               <h2 className="text-2xl font-bold mb-2">你想聊什么?</h2>
-              <p className="text-neutral-400 text-sm">
+              <p className="text-slate-600 text-sm">
                 选 1-3 个兴趣,匹配系统会用它们帮你找聊得来的人。
               </p>
             </div>
@@ -129,13 +129,13 @@ export default function OnboardingWizard({
             <div className="text-center">
               <div className="text-5xl mb-3">🌐</div>
               <h2 className="text-2xl font-bold mb-2">用什么语言聊?</h2>
-              <p className="text-neutral-400 text-sm">
+              <p className="text-slate-600 text-sm">
                 跨语言也能聊——对方说的话会实时翻译成你的语言。
               </p>
             </div>
             <div className="w-full space-y-5">
               <div>
-                <p className="text-xs text-neutral-500 mb-3 text-center">我说的语言</p>
+                <p className="text-xs text-slate-500 mb-3 text-center">我说的语言</p>
                 <div className="flex flex-wrap gap-2 justify-center">
                   {LANGUAGES.map((l) => (
                     <button
@@ -143,8 +143,8 @@ export default function OnboardingWizard({
                       onClick={() => setSl(l.code)}
                       className={`rounded-xl px-4 py-2 text-sm font-medium transition ${
                         sl === l.code
-                          ? "bg-sky-600 text-white shadow-lg shadow-sky-600/30"
-                          : "bg-neutral-800 text-neutral-300 hover:bg-neutral-700 border border-neutral-700"
+                          ? "bg-sky-600 text-slate-900 shadow-lg shadow-sky-600/30"
+                          : "bg-slate-100 text-slate-700 hover:bg-slate-200 border border-slate-300"
                       }`}
                     >
                       <span className="mr-1">{l.flag}</span>
@@ -154,7 +154,7 @@ export default function OnboardingWizard({
                 </div>
               </div>
               <div>
-                <p className="text-xs text-neutral-500 mb-3 text-center">对方的话翻译成</p>
+                <p className="text-xs text-slate-500 mb-3 text-center">对方的话翻译成</p>
                 <div className="flex flex-wrap gap-2 justify-center">
                   {LANGUAGES.filter((l) => l.code !== sl).map((l) => (
                     <button
@@ -162,8 +162,8 @@ export default function OnboardingWizard({
                       onClick={() => setTl(l.code)}
                       className={`rounded-xl px-4 py-2 text-sm font-medium transition ${
                         tl === l.code
-                          ? "bg-cyan-600 text-white shadow-lg shadow-cyan-600/30"
-                          : "bg-neutral-800 text-neutral-300 hover:bg-neutral-700 border border-neutral-700"
+                          ? "bg-cyan-600 text-slate-900 shadow-lg shadow-cyan-600/30"
+                          : "bg-slate-100 text-slate-700 hover:bg-slate-200 border border-slate-300"
                       }`}
                     >
                       <span className="mr-1">{l.flag}</span>
@@ -181,10 +181,10 @@ export default function OnboardingWizard({
             <div className="text-center">
               <div className="text-5xl mb-3">🎭</div>
               <h2 className="text-2xl font-bold mb-2">让化身认识你</h2>
-              <p className="text-neutral-400 text-sm max-w-sm mx-auto leading-relaxed">
+              <p className="text-slate-600 text-sm max-w-sm mx-auto leading-relaxed">
                 打开摄像头,把脸对准镜头。Q 版化身会跟着你笑、眨眼、说话,同步 60fps。
               </p>
-              <p className="text-neutral-500 text-xs mt-3 max-w-sm mx-auto">
+              <p className="text-slate-500 text-xs mt-3 max-w-sm mx-auto">
                 真实画面只在本机跑识别,不会离开你的设备。
               </p>
             </div>
@@ -199,7 +199,7 @@ export default function OnboardingWizard({
               <button
                 onClick={openCamera}
                 disabled={cameraBusy}
-                className="w-full rounded-2xl bg-gradient-to-r from-sky-400 via-cyan-400 to-emerald-500 hover:from-sky-500 hover:via-cyan-500 hover:to-emerald-600 px-8 py-3.5 text-base font-semibold shadow-xl shadow-emerald-500/30 disabled:opacity-50 transition"
+                className="w-full rounded-2xl bg-gradient-to-r from-sky-400 via-cyan-400 to-emerald-500 hover:from-sky-500 hover:via-cyan-500 hover:to-emerald-600 px-8 py-3.5 text-base font-semibold shadow-xl shadow-amber-500/30 disabled:opacity-50 transition"
               >
                 {cameraBusy ? "正在打开..." : "打开摄像头"}
               </button>
@@ -223,14 +223,14 @@ export default function OnboardingWizard({
           ) : (
             <button
               onClick={next}
-              className="w-full rounded-2xl bg-gradient-to-r from-sky-400 via-cyan-400 to-emerald-500 hover:from-sky-500 hover:via-cyan-500 hover:to-emerald-600 px-8 py-3.5 text-base font-semibold shadow-xl shadow-emerald-500/30 transition"
+              className="w-full rounded-2xl bg-gradient-to-r from-sky-400 via-cyan-400 to-emerald-500 hover:from-sky-500 hover:via-cyan-500 hover:to-emerald-600 px-8 py-3.5 text-base font-semibold shadow-xl shadow-amber-500/30 transition"
             >
               下一步
             </button>
           )}
           <button
             onClick={skip}
-            className="text-xs text-neutral-500 hover:text-neutral-300 transition py-2"
+            className="text-xs text-slate-500 hover:text-slate-700 transition py-2"
           >
             {step === 2 ? "以后再说" : "跳过"}
           </button>

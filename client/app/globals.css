@@ -2,9 +2,47 @@
 
 body {
   margin: 0;
-  background: #0f0f0f;
-  color: #f0f0f0;
+  /* 蓝天白云沙滩阳光 —— 与 marketing 主页统一 */
+  background:
+    linear-gradient(180deg,
+      #dbeafe 0%,     /* sky-200 蓝天 */
+      #eff6ff 30%,    /* sky-50 云白 */
+      #ffffff 60%,    /* 云 */
+      #fefce8 100%    /* yellow-50 沙滩暖光 */
+    );
+  background-attachment: fixed;
+  color: #0f172a; /* slate-900 */
   font-family: system-ui, -apple-system, sans-serif;
+}
+
+/* 顶层阳光柔光斑 —— 太阳 · 蓝天 · 海浪 · 沙滩,和主页同一手法 */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background:
+    radial-gradient(ellipse at 82% 8%,  rgba(250, 204, 21, 0.35) 0%, transparent 42%),  /* 阳光 */
+    radial-gradient(ellipse at 12% 20%, rgba(125, 211, 252, 0.30) 0%, transparent 50%), /* 蓝天 */
+    radial-gradient(ellipse at 78% 68%, rgba(103, 232, 249, 0.28) 0%, transparent 55%), /* 海浪 */
+    radial-gradient(ellipse at 15% 88%, rgba(253, 224, 71, 0.28) 0%, transparent 55%);  /* 沙滩 */
+}
+
+/* 通用天空阴影 —— 浅底卡片投影用暖蓝调,和 marketing 一致 */
+.sky-shadow {
+  box-shadow:
+    0 20px 40px -12px rgba(14, 165, 233, 0.22),
+    0 8px 16px -8px rgba(6, 182, 212, 0.15);
+}
+
+/* "深底舞台" 显式包裹类 —— 用在 VRM canvas 容器、字幕栏、通话叠加浮层等
+ * 必须保留深色的场景。作用: 在浅色 body 环境里造一个"聚光灯"局部深底,
+ * 让 text-white / border-white/* 在内部继续有效; 也让翻底色 codemod 有
+ * 一个明确的"这里不翻"边界。 */
+.qv-dark-surface {
+  background: #0a0f14;
+  color: #f0f0f0;
 }
 
 /* Emote float animation — spawned by FloatingEmoteLayer. Origin is the bottom

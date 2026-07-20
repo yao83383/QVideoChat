@@ -89,22 +89,22 @@ export default function SettingsModal({ show, onClose }: Props) {
   if (!show) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60" onClick={onClose}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40" onClick={onClose}>
       <div
-        className="bg-neutral-900 border border-neutral-700 rounded-2xl w-80 p-6 flex flex-col gap-6"
+        className="bg-white border border-slate-300 rounded-2xl w-80 p-6 flex flex-col gap-6"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between">
           <h3 className="font-semibold text-sm">设置</h3>
-          <button onClick={onClose} className="text-neutral-400 hover:text-white text-lg">&times;</button>
+          <button onClick={onClose} className="text-slate-600 hover:text-slate-900 text-lg">&times;</button>
         </div>
 
         {/* Gender declaration — used for future matching preferences and for
             steering avatar recommendations. Not required. */}
         <div className="flex flex-col gap-3">
           <div>
-            <p className="text-sm text-neutral-200">我的性别</p>
-            <p className="text-[10px] text-neutral-500">
+            <p className="text-sm text-slate-800">我的性别</p>
+            <p className="text-[10px] text-slate-500">
               {loggedIn
                 ? "已注册 · 修改需联系客服 contact@justsaysayforfun.com"
                 : "用于匹配偏好和化身推荐,不公开"}
@@ -121,10 +121,10 @@ export default function SettingsModal({ show, onClose }: Props) {
                   onClick={() => saveGender(g.code)}
                   className={`rounded-xl px-2 py-2 text-xs font-medium transition flex flex-col items-center gap-1 ${
                     active
-                      ? "bg-sky-600 text-white shadow shadow-sky-600/30"
+                      ? "bg-sky-600 text-slate-900 shadow shadow-sky-600/30"
                       : locked
-                      ? "bg-neutral-800/50 text-neutral-600 border border-neutral-800 cursor-not-allowed"
-                      : "bg-neutral-800 text-neutral-300 hover:bg-neutral-700 border border-neutral-700"
+                      ? "bg-slate-100 text-slate-400 border border-slate-200 cursor-not-allowed"
+                      : "bg-slate-100 text-slate-700 hover:bg-slate-200 border border-slate-300"
                   }`}
                 >
                   <span className="text-xl">{g.emoji}</span>
@@ -134,7 +134,7 @@ export default function SettingsModal({ show, onClose }: Props) {
             })}
           </div>
           {genderLockToast && (
-            <p className="text-[10px] text-yellow-400 leading-relaxed">
+            <p className="text-[10px] text-amber-600 leading-relaxed">
               性别一旦选定不可自行修改 · 如需变更请联系 <span className="font-mono">contact@justsaysayforfun.com</span>
             </p>
           )}
@@ -142,13 +142,13 @@ export default function SettingsModal({ show, onClose }: Props) {
 
         <div className="flex items-center justify-between">
           <div>
-            <p className="text-sm text-neutral-200">匹配时显示我的 ID</p>
-            <p className="text-[10px] text-neutral-500">关闭后对方看到你为"匿名用户"</p>
+            <p className="text-sm text-slate-800">匹配时显示我的 ID</p>
+            <p className="text-[10px] text-slate-500">关闭后对方看到你为"匿名用户"</p>
           </div>
           <button
             onClick={() => saveShowId(!showId)}
             className={`w-10 h-6 rounded-full transition relative ${
-              showId ? "bg-green-500" : "bg-neutral-700"
+              showId ? "bg-green-500" : "bg-slate-200"
             }`}
           >
             <span
@@ -163,11 +163,11 @@ export default function SettingsModal({ show, onClose }: Props) {
             compete with the primary settings toggles. Only shown when a
             token is present in localStorage. */}
         {loggedIn && (
-          <div className="pt-3 border-t border-neutral-800 flex justify-center">
+          <div className="pt-3 border-t border-slate-200 flex justify-center">
             <button
               type="button"
               onClick={() => setConfirmLogout(true)}
-              className="text-xs text-red-500/80 hover:text-red-400 transition py-1 px-3"
+              className="text-xs text-rose-600/80 hover:text-rose-600 transition py-1 px-3"
             >
               退出登录
             </button>
@@ -176,12 +176,12 @@ export default function SettingsModal({ show, onClose }: Props) {
       </div>
 
       {confirmLogout && (
-        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center px-4" onClick={() => setConfirmLogout(false)}>
-          <div className="w-full max-w-sm rounded-3xl bg-neutral-900 border border-white/10 p-6 flex flex-col gap-4" onClick={(e) => e.stopPropagation()}>
+        <div className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-sm flex items-center justify-center px-4" onClick={() => setConfirmLogout(false)}>
+          <div className="w-full max-w-sm rounded-3xl bg-white border border-slate-200 p-6 flex flex-col gap-4" onClick={(e) => e.stopPropagation()}>
             <div className="text-center">
               <div className="text-3xl mb-2">👋</div>
               <h3 className="text-lg font-semibold">退出登录?</h3>
-              <p className="text-neutral-400 text-xs mt-2">下次可以用邮箱 / 手机号 / ID + 密码重新登录</p>
+              <p className="text-slate-600 text-xs mt-2">下次可以用邮箱 / 手机号 / ID + 密码重新登录</p>
             </div>
             <div className="flex flex-col gap-2">
               <button
@@ -191,14 +191,14 @@ export default function SettingsModal({ show, onClose }: Props) {
                   const base = process.env.NEXT_PUBLIC_BASE_PATH || "";
                   window.location.href = `${base}/`;
                 }}
-                className="w-full rounded-2xl bg-red-600 hover:bg-red-500 px-6 py-2.5 text-sm font-semibold text-white transition"
+                className="w-full rounded-2xl bg-red-600 hover:bg-red-500 px-6 py-2.5 text-sm font-semibold text-slate-900 transition"
               >
                 确认退出
               </button>
               <button
                 type="button"
                 onClick={() => setConfirmLogout(false)}
-                className="text-xs text-neutral-500 hover:text-neutral-300 py-2"
+                className="text-xs text-slate-500 hover:text-slate-700 py-2"
               >
                 取消
               </button>

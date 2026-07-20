@@ -44,28 +44,28 @@ export default function ReportModal({ partnerName, onSubmit, onDismiss }: Props)
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-sm p-4"
       onClick={onDismiss}
     >
       <div
-        className="w-full max-w-sm rounded-3xl bg-neutral-900 border border-white/10 p-6 flex flex-col gap-4"
+        className="w-full max-w-sm rounded-3xl bg-white border border-slate-200 p-6 flex flex-col gap-4"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between">
           <h3 className="text-base font-semibold flex items-center gap-2">
-            <span className="text-red-400">🚨</span>
-            <span>举报 <span className="text-neutral-400 font-normal">{partnerName}</span></span>
+            <span className="text-rose-600">🚨</span>
+            <span>举报 <span className="text-slate-600 font-normal">{partnerName}</span></span>
           </h3>
           <button
             type="button"
             onClick={onDismiss}
             aria-label="关闭"
-            className="w-7 h-7 rounded-full text-neutral-500 hover:text-white hover:bg-white/10 transition"
+            className="w-7 h-7 rounded-full text-slate-500 hover:text-slate-900 hover:bg-slate-100 transition"
           >
             ×
           </button>
         </div>
-        <p className="text-xs text-neutral-400">
+        <p className="text-xs text-slate-600">
           选择举报理由。 提交后 TA 会加入你的黑名单,后续匹配自动跳过。
         </p>
 
@@ -78,12 +78,12 @@ export default function ReportModal({ partnerName, onSubmit, onDismiss }: Props)
               className={`flex items-center gap-3 rounded-xl px-4 py-3 text-sm text-left transition ${
                 category === c.key
                   ? "bg-red-600/20 border border-red-500/60 text-red-100"
-                  : "bg-white/[0.03] border border-white/10 text-neutral-200 hover:border-white/25 hover:bg-white/[0.06]"
+                  : "bg-white/[0.03] border border-slate-200 text-slate-800 hover:border-slate-200 hover:bg-white/[0.06]"
               }`}
             >
               <span className="text-lg">{c.emoji}</span>
               <span className="flex-1">{c.label}</span>
-              {category === c.key && <span className="text-red-400">✓</span>}
+              {category === c.key && <span className="text-rose-600">✓</span>}
             </button>
           ))}
         </div>
@@ -95,7 +95,7 @@ export default function ReportModal({ partnerName, onSubmit, onDismiss }: Props)
             placeholder="简单描述问题(必填)"
             maxLength={200}
             rows={3}
-            className="w-full rounded-xl bg-white/[0.03] border border-white/10 focus:border-white/30 outline-none px-3 py-2 text-sm text-neutral-100 placeholder-neutral-600 resize-none"
+            className="w-full rounded-xl bg-white/[0.03] border border-slate-200 focus:border-slate-200 outline-none px-3 py-2 text-sm text-slate-900 placeholder-neutral-600 resize-none"
           />
         )}
 
@@ -106,8 +106,8 @@ export default function ReportModal({ partnerName, onSubmit, onDismiss }: Props)
             disabled={!canSubmit}
             className={`w-full rounded-2xl px-6 py-3 text-sm font-semibold transition ${
               canSubmit
-                ? "bg-red-600 hover:bg-red-500 text-white shadow-lg shadow-red-600/25"
-                : "bg-neutral-800 text-neutral-500 cursor-not-allowed border border-white/5"
+                ? "bg-red-600 hover:bg-red-500 text-slate-900 shadow-lg shadow-red-600/25"
+                : "bg-slate-100 text-slate-500 cursor-not-allowed border border-slate-200"
             }`}
           >
             {submitting ? "提交中…" : "提交举报"}
@@ -115,7 +115,7 @@ export default function ReportModal({ partnerName, onSubmit, onDismiss }: Props)
           <button
             type="button"
             onClick={onDismiss}
-            className="text-xs text-neutral-500 hover:text-neutral-300 transition py-2"
+            className="text-xs text-slate-500 hover:text-slate-700 transition py-2"
           >
             取消
           </button>
