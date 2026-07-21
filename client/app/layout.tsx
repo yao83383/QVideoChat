@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import "./globals.css";
 import DesktopTitleBar from "@/components/DesktopTitleBar";
+import { SocketProvider } from "@/contexts/SocketContext";
 
 export const metadata: Metadata = {
   title: "QVideoChat",
@@ -19,7 +20,10 @@ export default function RootLayout({
             plain browser tab this renders nothing and body's padding-top
             stays whatever CSS said. */}
         <DesktopTitleBar />
-        {children}
+        {/* App-wide socket: one connection for the whole app so friends see
+            each other's presence regardless of what page they're on. See
+            contexts/SocketContext.tsx for the rationale. */}
+        <SocketProvider>{children}</SocketProvider>
       </body>
     </html>
   );

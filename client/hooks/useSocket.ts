@@ -1,10 +1,8 @@
 "use client";
 
-import { useRef, useState, useCallback, useEffect } from "react";
-import { io, Socket } from "socket.io-client";
-
-const SERVER_URL = process.env.NEXT_PUBLIC_SERVER_URL || "http://localhost:3001";
-const SOCKET_PATH = process.env.NEXT_PUBLIC_SOCKET_PATH || "/socket.io";
+import { useRef, useCallback, useEffect } from "react";
+import { Socket } from "socket.io-client";
+import { useSocketConnection } from "@/contexts/SocketContext";
 
 export interface MatchEvents {
   onWaiting: () => void;
@@ -40,53 +38,103 @@ export interface UseSocketReturn {
   sendFriendAccept: (fromUserId: string, toUserId: string) => void;
 }
 
+/**
+ * Consume the app-wide socket (see `contexts/SocketContext.tsx`) and hook
+ * up match / signal handlers. Historical note: this hook used to own the
+ * socket lifecycle (`io()` on mount, `disconnect()` on unmount). That was
+ * moved to the SocketProvider so the connection can outlive route changes
+ * — presence needs to persist while the user browses. The consumer API
+ * (this file's exports) is unchanged so callers didn't need updating.
+ *
+ * The `matchEvents` / `signalEvents` bags are stored in refs and re-read
+ * on every socket event, which means callers can pass fresh closures each
+ * render without churning the `socket.on(...)` subscriptions.
+ */
 export function useSocket(
   matchEvents: MatchEvents,
   signalEvents: SignalEvents,
 ): UseSocketReturn {
+  const { socket, isConnected } = useSocketConnection();
+
+  // Mirror the current socket into a ref so the returned emit helpers
+  // (memoized with `[]`) always see the latest socket after the provider
+  // rebuilds it (login/logout, storage listener path).
   const socketRef = useRef<Socket | null>(null);
-  const [isConnected, setIsConnected] = useState(false);
+  socketRef.current = socket;
+
   const matchEventsRef = useRef(matchEvents);
   const signalEventsRef = useRef(signalEvents);
-
   matchEventsRef.current = matchEvents;
   signalEventsRef.current = signalEvents;
 
   useEffect(() => {
-    const socket = io(SERVER_URL, {
-      path: SOCKET_PATH,
-      transports: ["websocket", "polling"],
-      reconnection: true,
-      reconnectionDelay: 1000,
-    });
+    if (!socket) return;
 
-    socket.on("connect", () => setIsConnected(true));
-    socket.on("disconnect", () => setIsConnected(false));
+    const onWaiting = () => matchEventsRef.current.onWaiting();
+    const onFound = (data: Parameters<MatchEvents["onFound"]>[0]) =>
+      matchEventsRef.current.onFound(data);
+    const onPartnerLeft = () => matchEventsRef.current.onPartnerLeft();
+    const onPartnerDisconnected = () => matchEventsRef.current.onPartnerDisconnected?.();
+    const onPartnerRejoined = () => matchEventsRef.current.onPartnerRejoined?.();
+    const onReady = () => matchEventsRef.current.onReady();
+    const onRoomError = (data: { message: string }) =>
+      matchEventsRef.current.onRoomError?.(data);
 
-    socket.on("match:waiting", () => matchEventsRef.current.onWaiting());
-    socket.on("match:found", (data) => matchEventsRef.current.onFound(data));
-    socket.on("partner:left", () => matchEventsRef.current.onPartnerLeft());
-    socket.on("partner:disconnected", () => matchEventsRef.current.onPartnerDisconnected?.());
-    socket.on("partner:rejoined", () => matchEventsRef.current.onPartnerRejoined?.());
-    socket.on("room:ready", () => matchEventsRef.current.onReady());
-    socket.on("room:error", (data) => matchEventsRef.current.onRoomError?.(data));
+    const onOffer = (data: { sdp: RTCSessionDescriptionInit }) =>
+      signalEventsRef.current.onOffer(data);
+    const onAnswer = (data: { sdp: RTCSessionDescriptionInit }) =>
+      signalEventsRef.current.onAnswer(data);
+    const onIce = (data: { candidate: RTCIceCandidateInit }) =>
+      signalEventsRef.current.onIce(data);
 
-    socket.on("signal:offer", (data) => signalEventsRef.current.onOffer(data));
-    socket.on("signal:answer", (data) => signalEventsRef.current.onAnswer(data));
-    socket.on("signal:ice", (data) => signalEventsRef.current.onIce(data));
+    const onFriendRequest = (data: { fromUserId: string; fromUsername: string }) =>
+      matchEventsRef.current.onFriendRequest?.(data);
+    const onFriendAccepted = (data: { userId: string }) =>
+      matchEventsRef.current.onFriendAccepted?.(data);
+    const onSessionKick = (data: { message: string }) =>
+      matchEventsRef.current.onSessionKick?.(data);
+    const onTopic = (data: { text: string; category: string }) =>
+      matchEventsRef.current.onTopic?.(data);
 
-    socket.on("friend:request", (data) => matchEventsRef.current.onFriendRequest?.(data));
-    socket.on("friend:accepted", (data) => matchEventsRef.current.onFriendAccepted?.(data));
-    socket.on("session:kick", (data) => matchEventsRef.current.onSessionKick?.(data));
-    socket.on("match:topic", (data) => matchEventsRef.current.onTopic?.(data));
+    socket.on("match:waiting", onWaiting);
+    socket.on("match:found", onFound);
+    socket.on("partner:left", onPartnerLeft);
+    socket.on("partner:disconnected", onPartnerDisconnected);
+    socket.on("partner:rejoined", onPartnerRejoined);
+    socket.on("room:ready", onReady);
+    socket.on("room:error", onRoomError);
 
-    socketRef.current = socket;
+    socket.on("signal:offer", onOffer);
+    socket.on("signal:answer", onAnswer);
+    socket.on("signal:ice", onIce);
 
+    socket.on("friend:request", onFriendRequest);
+    socket.on("friend:accepted", onFriendAccepted);
+    socket.on("session:kick", onSessionKick);
+    socket.on("match:topic", onTopic);
+
+    // Unsubscribe on unmount / when the provider gives us a new socket.
+    // We DO NOT call `socket.disconnect()` — the socket outlives the
+    // consuming component (see SocketContext.tsx).
     return () => {
-      socket.disconnect();
-      socketRef.current = null;
+      socket.off("match:waiting", onWaiting);
+      socket.off("match:found", onFound);
+      socket.off("partner:left", onPartnerLeft);
+      socket.off("partner:disconnected", onPartnerDisconnected);
+      socket.off("partner:rejoined", onPartnerRejoined);
+      socket.off("room:ready", onReady);
+      socket.off("room:error", onRoomError);
+
+      socket.off("signal:offer", onOffer);
+      socket.off("signal:answer", onAnswer);
+      socket.off("signal:ice", onIce);
+
+      socket.off("friend:request", onFriendRequest);
+      socket.off("friend:accepted", onFriendAccepted);
+      socket.off("session:kick", onSessionKick);
+      socket.off("match:topic", onTopic);
     };
-  }, []);
+  }, [socket]);
 
   const joinMatch = useCallback((userId: string, username: string, tags?: string[], nativeLang?: string, targetLang?: string) => {
     socketRef.current?.emit("match:join", {

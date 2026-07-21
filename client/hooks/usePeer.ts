@@ -4,6 +4,8 @@ import { useRef, useState, useCallback, useEffect } from "react";
 import type { BlendshapeFrame, PoseFrame } from "./useFaceMesh";
 import type { AvatarConfig } from "@/components/VrmAvatar";
 import { VoiceConnection } from "@/lib/voice/VoiceConnection";
+import { decodeFrame, type FramePayload } from "@/lib/blendshapeCodec";
+import { useFrameSender } from "./useFrameSender";
 
 interface SignalingEvents {
   onOffer: (sdp: RTCSessionDescriptionInit) => void;
@@ -79,7 +81,6 @@ export function usePeer(
   const remoteTranslationRef = useRef<TranslationMessage | null>(null);
   const translationSubsRef = useRef<Set<(msg: TranslationMessage) => void>>(new Set());
   const emoteSubsRef = useRef<Set<(key: string) => void>>(new Set());
-  const sendTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const signalingRef = useRef(signaling);
   signalingRef.current = signaling;
 
@@ -98,84 +99,50 @@ export function usePeer(
   const isMicOnRef = useRef(isMicOn);
   useEffect(() => { isMicOnRef.current = isMicOn; }, [isMicOn]);
 
+  // Fixed-rate publisher for our own avatar frames over the P2P DataChannel.
+  // Runs unconditionally; the sink no-ops when the channel isn't open yet,
+  // so we don't have to gate the hook on connection state. Presence
+  // (`usePresence`) uses the same useFrameSender + encodeFrame pair to
+  // publish the same schema over the app socket instead — see
+  // lib/blendshapeCodec.ts for the shared wire format.
+  const sendViaDc = useCallback((payload: FramePayload) => {
+    const dc = dcRef.current;
+    if (dc?.readyState !== "open") return;
+    dc.send(JSON.stringify(payload));
+  }, []);
+  useFrameSender(33, sendViaDc, {
+    blendshapeRef,
+    poseRef,
+    configRef: localAvatarConfigRef,
+    vrmPathRef: localVrmPathRef,
+  });
+
   const setupBlendshapeChannel = useCallback((dc: RTCDataChannel) => {
     dcRef.current = dc;
     dc.onopen = () => {
       setIsConnected(true);
       setIsConnecting(false);
-      if (sendTimerRef.current) clearInterval(sendTimerRef.current);
-      sendTimerRef.current = setInterval(() => {
-        if (dcRef.current?.readyState !== "open") return;
-        const data = blendshapeRef.current;
-        if (!data) return;
-        const filtered: Record<string, number> = {};
-        for (const [key, val] of Object.entries(data.values)) {
-          if (val > 0.001) filtered[key] = Math.round(val * 1000) / 1000;
-        }
-        const payload: { t: number; b: Record<string, number>; h?: number[]; p?: number[]; c?: [number, number]; v?: string } = {
-          t: data.timestamp,
-          b: filtered,
-        };
-        const r3 = (n: number) => Math.round(n * 1000) / 1000;
-        if (data.head) {
-          // Quantize head Euler to 3 decimals — ~0.06° resolution, plenty for
-          // face tracking, keeps the DC frame small. Trailing dist (meters,
-          // ~0.001 m resolution) is appended when available; older peers just
-          // see a 3-element array and ignore the length gap.
-          payload.h = [r3(data.head.pitch), r3(data.head.yaw), r3(data.head.roll)];
-          if (data.head.dist !== undefined) payload.h.push(r3(data.head.dist));
-        }
-        const pose = poseRef?.current;
-        if (pose) {
-          payload.p = [r3(pose.shoulderRoll), r3(pose.shoulderYaw)];
-        }
-        const cfg = localAvatarConfigRef?.current;
-        if (cfg) {
-          payload.c = [r3(cfg.zoom), r3(cfg.gain)];
-        }
-        // Broadcast which VRM asset the peer should render for us. Sent every
-        // frame (~30/s) instead of only on change so a late-joining peer or a
-        // dropped frame doesn't leave them stuck showing DLco. Older clients
-        // that don't know about `v` just ignore the extra field.
-        const vp = localVrmPathRef?.current;
-        if (vp) {
-          payload.v = vp;
-        }
-        dcRef.current.send(JSON.stringify(payload));
-      }, 33);
+      // Publishing loop lives at hook top-level (useFrameSender above);
+      // opening the channel just flips the sink from no-op to real send
+      // on the next tick.
     };
     dc.onmessage = (event) => {
       try {
-        const data = JSON.parse(event.data);
-        if (data.b) {
-          const frame: BlendshapeFrame = { timestamp: data.t, values: data.b };
-          if (Array.isArray(data.h) && data.h.length >= 3) {
-            frame.head = { pitch: data.h[0], yaw: data.h[1], roll: data.h[2] };
-            if (data.h.length >= 4) frame.head.dist = data.h[3];
-          }
-          remoteBlendshapeRef.current = frame;
-          if (Array.isArray(data.p) && data.p.length >= 2) {
-            remotePoseRef.current = {
-              timestamp: data.t,
-              shoulderRoll: data.p[0],
-              shoulderYaw: data.p[1],
-            };
-          }
-          if (Array.isArray(data.c) && data.c.length >= 2) {
-            remoteAvatarConfigRef.current = {
-              zoom: data.c[0],
-              gain: data.c[1],
-            };
-          }
-          if (typeof data.v === "string" && data.v.length > 0) {
-            // Only setState when the value actually differs — receiving the
-            // same path 30x/s would trigger 30 re-renders/s otherwise.
-            setRemoteVrmPath((prev) => (prev === data.v ? prev : data.v));
-          }
+        const payload = JSON.parse(event.data) as FramePayload;
+        const decoded = decodeFrame(payload);
+        if (!decoded) return;
+        remoteBlendshapeRef.current = decoded.blendshape;
+        if (decoded.pose) remotePoseRef.current = decoded.pose;
+        if (decoded.config) remoteAvatarConfigRef.current = decoded.config;
+        if (decoded.vrmPath) {
+          // Only setState when the value actually differs — receiving the
+          // same path 30x/s would trigger 30 re-renders/s otherwise.
+          const v = decoded.vrmPath;
+          setRemoteVrmPath((prev) => (prev === v ? prev : v));
         }
-      } catch { /* ignore */ }
+      } catch { /* ignore malformed */ }
     };
-  }, [blendshapeRef, poseRef, localAvatarConfigRef, localVrmPathRef]);
+  }, []);
 
   const setupTranslationChannel = useCallback((dc: RTCDataChannel) => {
     translateDcRef.current = dc;
@@ -236,7 +203,6 @@ export function usePeer(
   }, []);
 
   const cleanup = useCallback(() => {
-    if (sendTimerRef.current) { clearInterval(sendTimerRef.current); sendTimerRef.current = null; }
     dcRef.current?.close(); dcRef.current = null;
     translateDcRef.current?.close(); translateDcRef.current = null;
     voiceRef.current?.close(); voiceRef.current = null;
