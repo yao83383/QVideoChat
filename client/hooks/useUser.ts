@@ -10,6 +10,20 @@ export interface UserState {
   token: string | null;
 }
 
+/** Broadcast an auth transition to the rest of the app (chiefly
+ *  SocketProvider, which needs to reopen the socket against the new
+ *  token so presence:hello fires against the new userId). Storage events
+ *  don't fire on the tab that wrote to localStorage — this event covers
+ *  that same-tab path. */
+function notifyAuthChanged() {
+  if (typeof window === "undefined") return;
+  try {
+    window.dispatchEvent(new Event("qv:auth-changed"));
+  } catch {
+    /* ignore */
+  }
+}
+
 export function useUser() {
   const [user, setUser] = useState<UserState | null>(null);
   const [loading, setLoading] = useState(true);
@@ -60,6 +74,7 @@ export function useUser() {
         token: data.token,
       };
       setUser(u);
+      notifyAuthChanged();
       return u;
     } catch {
       const userId = Math.random().toString(36).slice(2, 10);
@@ -79,6 +94,7 @@ export function useUser() {
     };
     localStorage.setItem("user", JSON.stringify({ userId: u.userId, username: u.username, isRegistered: true }));
     setUser(u);
+    notifyAuthChanged();
     // Bring cross-device prefs into localStorage — see syncPrefsAfterAuth.
     await syncPrefsAfterAuth(false).catch(() => { /* non-fatal */ });
     return u;
@@ -96,6 +112,7 @@ export function useUser() {
     };
     localStorage.setItem("user", JSON.stringify({ userId: u.userId, username: u.username, isRegistered: true }));
     setUser(u);
+    notifyAuthChanged();
     await syncPrefsAfterAuth(false).catch(() => { /* non-fatal */ });
     return u;
   }, []);
@@ -115,6 +132,7 @@ export function useUser() {
     };
     localStorage.setItem("user", JSON.stringify({ userId: u.userId, username: u.username, isRegistered: true }));
     setUser(u);
+    notifyAuthChanged();
     await syncPrefsAfterAuth(data.isNew).catch(() => { /* non-fatal */ });
     return u;
   }, []);
@@ -124,6 +142,7 @@ export function useUser() {
     const u: UserState = { userId, username: user?.username || "", isRegistered: true, token: api.getToken() };
     localStorage.setItem("user", JSON.stringify({ userId: u.userId, username: u.username, isRegistered: true }));
     setUser(u);
+    notifyAuthChanged();
   }, [user]);
 
   const doSignup = useCallback(async (username: string, email: string, password: string, inviteCode = "") => {
@@ -131,6 +150,7 @@ export function useUser() {
     const u: UserState = { userId: data.userId, username, isRegistered: true, token: data.token };
     localStorage.setItem("user", JSON.stringify({ userId: u.userId, username, isRegistered: true }));
     setUser(u);
+    notifyAuthChanged();
     await syncPrefsAfterAuth(true).catch(() => { /* non-fatal */ });
     return u;
   }, []);
@@ -139,6 +159,7 @@ export function useUser() {
     api.logout();
     localStorage.removeItem("user");
     setUser(null);
+    notifyAuthChanged();
   }, []);
 
   return { user, loading, createUser, doLogin, doLoginByIdentifier, doRegister, doSignup, doPhoneAuth, doLogout };

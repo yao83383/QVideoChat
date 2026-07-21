@@ -49,6 +49,22 @@ function readToken(): string {
   }
 }
 
+/** Read the current logged-in userId from the `user` blob localStorage
+ *  keeps in sync with useUser. Returns null if we don't have one — the
+ *  presence:hello won't fire in that case, and the server treats the
+ *  socket as guest until match:join comes along. */
+function readUserId(): string | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = localStorage.getItem("user");
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    return typeof parsed?.userId === "string" && parsed.userId ? parsed.userId : null;
+  } catch {
+    return null;
+  }
+}
+
 export function SocketProvider({ children }: { children: React.ReactNode }) {
   // Socket lives in state (not just a ref) so consumers re-render the
   // moment it's created — a ref-only implementation would leave consumers
@@ -79,7 +95,19 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
         auth: { token },
       });
 
-      s.on("connect", () => setIsConnected(true));
+      s.on("connect", () => {
+        setIsConnected(true);
+        // Announce ourselves to the presence layer (Phase 1.3). Server
+        // uses this to broadcast presence:online to our friends and to
+        // push a snapshot of their current states back on the same
+        // socket. Re-emit on every connect (including reconnections) so
+        // a transient network blip doesn't leave the server thinking
+        // we're offline. If we don't have a userId yet (pre-login) we
+        // just skip — the hello can re-fire after login via the storage
+        // listener path.
+        const uid = readUserId();
+        if (uid) s.emit("presence:hello", { userId: uid });
+      });
       s.on("disconnect", () => setIsConnected(false));
 
       current = s;
@@ -88,12 +116,18 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
 
     openSocket();
 
-    // React to login/logout in another tab: if token changes we drop the
-    // current socket and reopen with the new token. Same-tab changes are
-    // handled by the auth flow calling `location.reload()`, which restarts
-    // the whole app so we don't need to observe those here.
-    const onStorage = (e: StorageEvent) => {
-      if (e.key !== "token") return;
+    // React to login/logout: token changing means the socket needs to
+    // hand up a fresh handshake, and — more importantly — presence:hello
+    // needs to fire against the new userId. Two channels:
+    //
+    // - `storage` event: another tab logged in/out. Fires everywhere
+    //   except the tab that made the change.
+    // - `qv:auth-changed` custom event: fired by useUser on the same tab
+    //   whenever setUser transitions state (login, signup, logout).
+    //   Storage events don't fire on the source tab, so without this
+    //   the tab that just logged in would keep talking to the server as
+    //   a guest until the user manually reloaded.
+    const reconnectIfTokenChanged = () => {
       const newToken = readToken();
       if (newToken === tokenAtConnectRef.current) return;
       if (current) current.disconnect();
@@ -102,10 +136,17 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
       setIsConnected(false);
       openSocket();
     };
+    const onStorage = (e: StorageEvent) => {
+      if (e.key !== "token" && e.key !== "user") return;
+      reconnectIfTokenChanged();
+    };
+    const onAuthChanged = () => reconnectIfTokenChanged();
     window.addEventListener("storage", onStorage);
+    window.addEventListener("qv:auth-changed", onAuthChanged);
 
     return () => {
       window.removeEventListener("storage", onStorage);
+      window.removeEventListener("qv:auth-changed", onAuthChanged);
       if (current) current.disconnect();
       current = null;
       setSocket(null);

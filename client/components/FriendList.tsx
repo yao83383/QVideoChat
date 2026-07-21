@@ -1,14 +1,20 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
 import Link from "next/link";
 import * as api from "@/lib/api";
-import { acceptFriend } from "@/lib/api";
+import AvatarTile from "./AvatarTile";
+import { getAvatar } from "@/lib/avatars";
+import { usePresence } from "@/hooks/usePresence";
 
 interface Friend {
   userId: string;
   username: string;
   avatarOutfit: string;
+  /** Server side stores the AVATARS id (e.g. "dlco", "female-black").
+   *  Optional because older users may not have set one yet — getAvatar()
+   *  falls back to the default when absent. */
+  avatarId?: string;
   friendSince: number;
 }
 
@@ -28,7 +34,7 @@ interface Props {
   } | null;
 }
 
-export default function FriendList({ isOpen, onClose, currentUserId, socket }: Props) {
+export default function FriendList({ isOpen, onClose }: Props) {
   const [friends, setFriends] = useState<Friend[]>([]);
   const [pending, setPending] = useState<PendingRequest[]>([]);
   const [tab, setTab] = useState<"friends" | "requests">("friends");
@@ -49,6 +55,18 @@ export default function FriendList({ isOpen, onClose, currentUserId, socket }: P
     if (!isOpen) return;
     loadData();
   }, [isOpen, loadData]);
+
+  // Subscribe to friends' presence ONLY while the panel is open. Passing an
+  // empty array when closed makes usePresence emit presence:unsub for
+  // whatever was previously subscribed, so a user who opens FriendList,
+  // closes it, and browses elsewhere doesn't keep the server fanning frames
+  // at them. Cheap re-sub on next open — snapshot event repaints tiles in
+  // one round trip.
+  const friendIds = useMemo(
+    () => (isOpen ? friends.map((f) => f.userId) : []),
+    [isOpen, friends],
+  );
+  const presence = usePresence(friendIds);
 
   const handleAccept = async (friendId: string) => {
     await api.acceptFriend(friendId);
@@ -99,14 +117,20 @@ export default function FriendList({ isOpen, onClose, currentUserId, socket }: P
               <p className="text-xs text-slate-500 text-center py-6">还没有好友，去匹配认识新朋友吧</p>
             ) : (
               <div className="flex flex-col gap-2">
-                {friends.map((f) => (
-                  <div key={f.userId} className="flex items-center gap-3 p-2 rounded-lg bg-slate-100">
-                    <div className="w-8 h-8 rounded-full bg-slate-200 flex items-center justify-center text-xs">
-                      {f.username.slice(0, 1)}
+                {friends.map((f) => {
+                  const entry = getAvatar(f.avatarId);
+                  return (
+                    <div key={f.userId} className="flex items-center gap-3 p-2 rounded-lg bg-slate-100">
+                      <AvatarTile
+                        entry={entry}
+                        presence={presence.get(f.userId)}
+                        size={44}
+                        fallbackChar={f.username.slice(0, 1)}
+                      />
+                      <span className="text-sm text-slate-800 flex-1 truncate">{f.username}</span>
                     </div>
-                    <span className="text-sm text-slate-800">{f.username}</span>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             )
           ) : (

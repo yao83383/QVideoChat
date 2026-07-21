@@ -16,6 +16,8 @@ import { useSocket } from "@/hooks/useSocket";
 import { useUser } from "@/hooks/useUser";
 import { useSelectedAvatar } from "@/hooks/useSelectedAvatar";
 import { useGuestName } from "@/hooks/useGuestName";
+import { useAfk } from "@/hooks/useAfk";
+import { usePresence } from "@/hooks/usePresence";
 import { AVATARS, DEFAULT_AVATAR_ID } from "@/lib/avatars";
 import { preloadSherpa } from "@/lib/ai/sherpa-engine";
 import { preloadPair } from "@/lib/ai/translate";
@@ -135,6 +137,26 @@ export default function Home() {
   const { selectedEntry } = useSelectedAvatar();
 
   useEffect(() => () => stop(), [stop]);
+
+  // Presence publisher (Phase 1). While the user is logged in AND the
+  // camera is on, we stream our avatar frames to the server so any friend
+  // who has the FriendList open sees us light up. AFK for 3 min (no face)
+  // → drop to 5fps + emit presence:sleeping so friends' tiles turn grey.
+  // We pass no `friendIds` here — this page is a publisher, not a
+  // subscriber; FriendList does its own usePresence for the receive side.
+  const isAfk = useAfk(faceFound);
+  const vrmPathRef = useRef<string | null>(null);
+  vrmPathRef.current = selectedEntry?.vrmPath ?? null;
+  const selfPresence = useMemo(
+    () =>
+      user?.userId && isCameraOn
+        ? { isAfk, blendshapeRef, poseRef, vrmPathRef }
+        : undefined,
+    // `blendshapeRef` / `poseRef` / `vrmPathRef` are refs — their identity
+    // is stable across renders, so listing them in deps is safe.
+    [user?.userId, isCameraOn, isAfk, blendshapeRef, poseRef],
+  );
+  usePresence([], selfPresence);
 
   // Community-gate takes precedence over onboarding. Both are per-browser
   // localStorage gates, resolved after the first client-side effect so SSR
