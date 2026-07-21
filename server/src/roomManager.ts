@@ -41,6 +41,18 @@ export class RoomManager {
     return undefined;
   }
 
+  /** Find the room this userId is currently in (by userId, not socketId —
+   *  survives socket rebinds during grace-period reconnects). Used by
+   *  presence's busy-state gate to mark "in-call" and stop frame fanout. */
+  getByUserId(userId: string): Room | undefined {
+    for (const room of this.rooms.values()) {
+      if (room.users.some((u) => u.userId === userId)) {
+        return room;
+      }
+    }
+    return undefined;
+  }
+
   updateSocket(roomId: string, userId: string, socketId: string): boolean {
     const room = this.rooms.get(roomId);
     if (!room) return false;

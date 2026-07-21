@@ -418,7 +418,7 @@ export function acceptFriendRequest(userId: string, friendId: string) {
 export function getFriends(userId: string) {
   const d = getDb();
   return d.prepare(`
-    SELECT u.userId, u.username, u.avatarOutfit, f.createdAt as friendSince
+    SELECT u.userId, u.username, u.avatarOutfit, u.avatarId, u.gender, f.createdAt as friendSince
     FROM friends f
     JOIN users u ON (f.friendId = u.userId AND f.userId = ?) OR (f.userId = u.userId AND f.friendId = ?)
     WHERE f.status = 'accepted'

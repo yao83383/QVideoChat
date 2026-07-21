@@ -60,6 +60,14 @@ export class MatchQueue {
     this.queue = this.queue.filter((u) => u.userId !== userId);
   }
 
+  /** Cheap O(n) membership check — used by presence's busy-state gate.
+   *  n is queue length (rarely more than a few dozen at once) so we don't
+   *  bother maintaining a side Set. Swap for a Map if the queue ever grows
+   *  large enough that per-frame filtering shows up in a profile. */
+  hasUser(userId: string): boolean {
+    return this.queue.some((u) => u.userId === userId);
+  }
+
   removeBySocket(socketId: string): void {
     this.queue = this.queue.filter((u) => u.socketId !== socketId);
   }
