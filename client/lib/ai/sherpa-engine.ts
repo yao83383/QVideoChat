@@ -299,15 +299,34 @@ function ensureSherpaLoaded(): Promise<SherpaEnv> {
         });
       }, 2000);
 
+      let resolveInit: (() => void) | null = null;
+      let initSettled = false;
+      const finishInit = (source: string) => {
+        if (initSettled) return;
+        initSettled = true;
+        clearInterval(dumpTimer);
+        clearInterval(pollTimer);
+        console.log(`[sherpa] runtime ready (via ${source})`);
+        updateLoadState({ phase: "initializing", message: "初始化识别引擎..." });
+        resolveInit?.();
+        resolveInit = null;
+      };
+
+      // Poll fallback: 某些 emscripten build + blob URL 组合下
+      // onRuntimeInitialized 不 fire.每 300ms 直接 poll Module.calledRun
+      // (emscripten 里 main() 跑完就置 true),兜底 finish.
+      const pollTimer = setInterval(() => {
+        if ((M as any).calledRun === true) {
+          finishInit("Module.calledRun");
+        }
+      }, 300);
+
       const initReady = new Promise<void>((resolve, reject) => {
-        M.onRuntimeInitialized = () => {
-          clearInterval(dumpTimer);
-          console.log("[sherpa] onRuntimeInitialized");
-          updateLoadState({ phase: "initializing", message: "初始化识别引擎..." });
-          resolve();
-        };
+        resolveInit = resolve;
+        M.onRuntimeInitialized = () => finishInit("onRuntimeInitialized");
         M.onAbort = (reason: any) => {
           clearInterval(dumpTimer);
+          clearInterval(pollTimer);
           console.error("[sherpa] onAbort:", reason);
           reject(new Error(`sherpa wasm abort: ${reason}`));
         };
@@ -315,13 +334,11 @@ function ensureSherpaLoaded(): Promise<SherpaEnv> {
 
       M.setStatus = (status: string) => {
         console.log("[sherpa status]", JSON.stringify(status));
-        if (!status) return;
-        // Phase lock: 一旦已经进入 initializing / ready / error,
-        // emscripten 后续的 setStatus 消息不再回滚 phase.历史上遇到 bug —
-        // emscripten preload 结束时会 fire 一次 "Downloading data... (X/X)"
-        // 100% 消息,如果 onRuntimeInitialized 已经 fire、我们 phase 也
-        // 已经变了 initializing,这个 setStatus 会把 phase 打回 downloading,
-        // UI 就一直卡在"首次加载识别模型 100%".
+        // 空 status = emscripten 完成信号 —— fallback resolve 兜底
+        if (!status) {
+          finishInit("empty setStatus");
+          return;
+        }
         const p = loadState.phase;
         const phaseLocked = p === "initializing" || p === "ready" || p === "error";
         const m = status.match(/Downloading data\.\.\. \((\d+)\/(\d+)\)/);
@@ -335,7 +352,11 @@ function ensureSherpaLoaded(): Promise<SherpaEnv> {
           updateLoadState(patch);
           return;
         }
-        // 非下载消息(比如 "Running..." / "Ready.")—— 只更 message.
+        // "Running..." 也是 runtime 已经就绪的信号 —— 也 fallback resolve
+        if (status === "Running...") {
+          finishInit("Running...");
+          return;
+        }
         updateLoadState({ message: status });
       };
       M.print = (msg: string) => console.log("[sherpa print]", msg);
@@ -343,6 +364,17 @@ function ensureSherpaLoaded(): Promise<SherpaEnv> {
 
       await loadScript(`${base}/sherpa-onnx-wasm-main-vad-asr.js`);
       await initReady;
+
+      // 有些 emscripten build 会在 setStatus("") 之前把 native symbols
+      // 注册好;但保险起见,再 poll 一下 wasm 里的 CreateOfflineRecognizer
+      // native fn 真正可用.最多等 5 秒.超时就直接尝试,让下面的 catch 兜底.
+      const waitForNative = async () => {
+        for (let i = 0; i < 50; i++) {
+          if (typeof (M as any)._SherpaOnnxCreateOfflineRecognizer === "function") return;
+          await new Promise((r) => setTimeout(r, 100));
+        }
+      };
+      await waitForNative();
 
       // .data 已经进入 emscripten FS,可以 revoke blob URL 释放内存
       if (dataBlobUrl) {
