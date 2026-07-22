@@ -1,21 +1,28 @@
 /**
- * sherpa-engine — realtime ASR via sherpa-onnx WebAssembly, running entirely
- * in the browser. Replaces the Tencent Cloud proxy — no server round-trip,
- * no per-minute cost, no signature dance, no /qsignal/asr WebSocket.
+ * sherpa-engine — realtime ASR via sherpa-onnx WebAssembly.
+ *
+ * v2 (2026-07-22): 从流式 zipformer(zh-en 双语)升级到 VAD + offline
+ * SenseVoice small(中/英/日/韩/粤 5 语种).识别准确率大幅提升,尤其
+ * 中英切换.代价是失去 streaming interim —— 必须等一整句结束才出结果.
  *
  * Bundle at client/public/sherpa-asr/:
- *   sherpa-onnx-asr.js              wrapper defining createOnlineRecognizer()
- *   sherpa-onnx-wasm-main-asr.js    emscripten glue
- *   sherpa-onnx-wasm-main-asr.wasm  onnxruntime + sherpa-onnx binary
- *   sherpa-onnx-wasm-main-asr.data  preloaded FS: encoder/decoder/joiner + tokens.txt
+ *   sherpa-onnx-asr.js               offline OfflineRecognizer wrapper (~54KB)
+ *   sherpa-onnx-vad.js               VAD (Silero) wrapper (~8KB)
+ *   sherpa-onnx-wasm-main-vad-asr.js emscripten glue (~117KB)
+ *   sherpa-onnx-wasm-main-vad-asr.wasm ONNX runtime + sherpa binary (~13MB)
+ *   sherpa-onnx-wasm-main-vad-asr.data preload FS: silero_vad.onnx +
+ *     sense-voice.onnx + tokens.txt (~240MB)
  *
- * The .data file bundles a streaming Zipformer bilingual zh-en model
- * (sherpa-onnx-streaming-zipformer-bilingual-zh-en-2023-02-20). One model,
- * both languages — the `lang` argument is passed through to callbacks
- * verbatim; it doesn't switch the underlying recognizer.
+ * Pipeline:
+ *   mic → 16k downsample → CircularBuffer
+ *          → 每 512 samples 切片喂 VAD (silero)
+ *          → VAD 检测句末 → 取整段 samples
+ *          → OfflineRecognizer 一次性识别
+ *          → onResult(text, isFinal=true)
  *
- * Public API: createSherpaEngine(stream, lang, onResult, onError?, onStatus?)
- * returns { start(), stop() }. Mirrors the shape RoomClient already drives.
+ * 外部 API 完全等价 v1 —— createSherpaEngine 签名不变;上游 RoomClient /
+ * /tools/translate 不用改.只是 onResult 里的 result 只有 final(没有
+ * interim 更新),这体现在字幕不再流式跳字,而是"整句一次出".
  */
 
 import type { ASRResult } from "./asr";
@@ -29,6 +36,7 @@ export interface SherpaEngine {
 
 const SAMPLE_RATE = 16000;
 
+// ---- wasm typings (opaque handles + module object) ----
 type EmscriptenModule = {
   onRuntimeInitialized?: () => void;
   locateFile?: (path: string, prefix?: string) => string;
@@ -38,24 +46,45 @@ type EmscriptenModule = {
   [k: string]: any;
 };
 
-type SherpaRecognizer = {
-  createStream: () => SherpaStream;
-  isReady: (s: SherpaStream) => boolean;
-  decode: (s: SherpaStream) => void;
-  isEndpoint: (s: SherpaStream) => boolean;
-  getResult: (s: SherpaStream) => { text: string; tokens?: string[] };
-  reset: (s: SherpaStream) => void;
-  config?: any;
-};
-
-type SherpaStream = {
+interface OfflineStreamHandle {
   acceptWaveform: (sampleRate: number, samples: Float32Array) => void;
   free?: () => void;
-};
+}
+
+interface OfflineRecognizerHandle {
+  createStream: () => OfflineStreamHandle;
+  decode: (s: OfflineStreamHandle) => void;
+  getResult: (s: OfflineStreamHandle) => { text: string; lang?: string };
+}
+
+interface VadHandle {
+  acceptWaveform: (samples: Float32Array) => void;
+  isEmpty: () => boolean;
+  isDetected: () => boolean;
+  pop: () => void;
+  clear: () => void;
+  front: () => { samples: Float32Array; start: number };
+  reset: () => void;
+  flush: () => void;
+  free: () => void;
+  config: any;
+}
+
+interface CircularBufferHandle {
+  push: (samples: Float32Array) => void;
+  get: (startIndex: number, n: number) => Float32Array;
+  pop: (n: number) => void;
+  size: () => number;
+  head: () => number;
+  reset: () => void;
+  free: () => void;
+}
 
 type SherpaGlobal = {
   Module?: EmscriptenModule;
-  createOnlineRecognizer?: (module: EmscriptenModule) => SherpaRecognizer;
+  OfflineRecognizer?: new (config: any, module: EmscriptenModule) => OfflineRecognizerHandle;
+  createVad?: (module: EmscriptenModule, config?: any) => VadHandle;
+  CircularBuffer?: new (capacity: number, module: EmscriptenModule) => CircularBufferHandle;
 };
 
 function sherpaBasePath(): string {
@@ -64,9 +93,7 @@ function sherpaBasePath(): string {
   return `${base}/sherpa-asr`;
 }
 
-// Progress reporting during .data + .wasm download. The emscripten runtime
-// calls Module.setStatus with strings like "Downloading data... (12345/67890)"
-// during preloadFile fetch.
+// ---- load state progress ----
 export type SherpaLoadState = {
   phase: "idle" | "downloading" | "initializing" | "ready" | "error";
   loaded: number;
@@ -95,20 +122,13 @@ function updateLoadState(patch: Partial<SherpaLoadState>) {
   for (const l of loadListeners) l({ ...loadState });
 }
 
-// ---- OPFS cache for the 190MB .data payload ----
+// ---- OPFS cache for the ~240MB .data payload ----
 //
-// The emscripten `.data` file bundles encoder/decoder/joiner ONNX + tokens.txt
-// and never changes for a given sherpa release. HTTP `Cache-Control: immutable`
-// keeps it in disk cache, but browsers evict disk cache under pressure and
-// emscripten still re-parses ~190MB into the virtual FS every page load. Instead
-// we mirror it into the origin-private OPFS: first visit fetches + writes,
-// subsequent loads read from OPFS and hand emscripten a blob: URL — the network
-// fetch inside emscripten now hits our blob (memory-speed) instead of the net.
-//
-// Version tag is baked into the OPFS key so upgrading the sherpa build later
-// invalidates the cache cleanly (stale entries are pruned).
-const SHERPA_DATA_VERSION = "v1.13.4-zh-en-zipformer";
-const SHERPA_DATA_OPFS_KEY = `sherpa-onnx-wasm-main-asr.data-${SHERPA_DATA_VERSION}`;
+// v2 换 bundle 后文件名变了(sherpa-onnx-wasm-main-**vad**-asr.data),
+// OPFS key 前缀也带 v2.  prune 会一次性清所有 sherpa 老前缀文件,
+// 保证升级路径干净.
+const SHERPA_DATA_VERSION = "v2-1.13.2-sensevoice-vad";
+const SHERPA_DATA_OPFS_KEY = `sherpa-vad-asr.data-${SHERPA_DATA_VERSION}`;
 
 async function opfsGetRoot(): Promise<FileSystemDirectoryHandle | null> {
   try {
@@ -127,14 +147,12 @@ async function opfsReadFile(root: FileSystemDirectoryHandle, name: string): Prom
     const file = await handle.getFile();
     return await file.arrayBuffer();
   } catch {
-    return null; // NotFoundError etc.
+    return null;
   }
 }
 
 async function opfsWriteFile(root: FileSystemDirectoryHandle, name: string, buf: ArrayBuffer): Promise<void> {
   const handle = await root.getFileHandle(name, { create: true });
-  // createWritable is broadly supported (Chrome 86+, Safari 15.2+, Firefox 111+).
-  // Fall back silently if a browser refuses; we'll just re-fetch next time.
   const writable = await (handle as any).createWritable();
   await writable.write(buf);
   await writable.close();
@@ -142,16 +160,20 @@ async function opfsWriteFile(root: FileSystemDirectoryHandle, name: string, buf:
 
 async function opfsPruneStaleData(root: FileSystemDirectoryHandle, keep: string): Promise<void> {
   try {
-    // @ts-expect-error entries() is standard on FileSystemDirectoryHandle but not always in TS lib
+    // @ts-expect-error entries() 存在但 TS lib 未列
     for await (const [name] of root.entries()) {
       if (typeof name === "string"
-          && name.startsWith("sherpa-onnx-wasm-main-asr.data-")
+          && (name.startsWith("sherpa-onnx-wasm-main-asr.data-")
+              || name.startsWith("sherpa-vad-asr.data-")
+              || name.startsWith("sherpa-onnx-wasm-main-vad-asr.data-"))
           && name !== keep) {
-        try { await root.removeEntry(name); console.log("[sherpa opfs] pruned stale", name); }
-        catch { /* best-effort */ }
+        try {
+          await root.removeEntry(name);
+          console.log("[sherpa opfs] pruned stale", name);
+        } catch { /* best-effort */ }
       }
     }
-  } catch { /* iterator unsupported — leave stale entries, minor waste */ }
+  } catch { /* iterator unsupported */ }
 }
 
 async function fetchDataWithProgress(url: string): Promise<ArrayBuffer> {
@@ -181,8 +203,6 @@ async function fetchDataWithProgress(url: string): Promise<ArrayBuffer> {
   return out.buffer;
 }
 
-// Resolve the .data payload as a blob: URL, using OPFS as a persistent local cache.
-// Returns the blob URL — caller MUST revoke it once emscripten is done with it.
 async function resolveDataBlobUrl(baseUrl: string): Promise<string> {
   const root = await opfsGetRoot();
   if (root) {
@@ -213,17 +233,22 @@ async function resolveDataBlobUrl(baseUrl: string): Promise<string> {
   return URL.createObjectURL(new Blob([buf], { type: "application/octet-stream" }));
 }
 
-// ---- singleton recognizer bootstrap ----
+// ---- singleton bootstrap ----
+//
+// v2 里 loaded state = { recognizer, Module }.recognizer 全局共享;每个
+// createSherpaEngine 实例自己拿 vad + buffer(vad 有内部状态,不能共享).
 
-let recognizerPromise: Promise<SherpaRecognizer> | null = null;
+interface SherpaEnv {
+  Module: EmscriptenModule;
+  recognizer: OfflineRecognizerHandle;
+}
+
+let envPromise: Promise<SherpaEnv> | null = null;
 
 async function loadScript(src: string): Promise<void> {
   return new Promise((resolve, reject) => {
     const existing = document.querySelector(`script[data-sherpa="${src}"]`);
-    if (existing) {
-      resolve();
-      return;
-    }
+    if (existing) { resolve(); return; }
     const s = document.createElement("script");
     s.src = src;
     s.async = true;
@@ -234,8 +259,8 @@ async function loadScript(src: string): Promise<void> {
   });
 }
 
-export function ensureSherpaLoaded(): Promise<SherpaRecognizer> {
-  if (recognizerPromise) return recognizerPromise;
+function ensureSherpaLoaded(): Promise<SherpaEnv> {
+  if (envPromise) return envPromise;
   if (typeof window === "undefined") {
     return Promise.reject(new Error("sherpa can only load in the browser"));
   }
@@ -243,30 +268,22 @@ export function ensureSherpaLoaded(): Promise<SherpaRecognizer> {
   const base = sherpaBasePath();
   const w = window as unknown as SherpaGlobal & Window;
 
-  recognizerPromise = (async () => {
+  envPromise = (async () => {
     updateLoadState({ phase: "downloading", message: "加载识别模型..." });
     let dataBlobUrl: string | null = null;
     try {
-      // 1) wrapper first — defines createOnlineRecognizer on the global scope.
+      // 1) OfflineRecognizer + VAD + CircularBuffer wrappers.
       await loadScript(`${base}/sherpa-onnx-asr.js`);
+      await loadScript(`${base}/sherpa-onnx-vad.js`);
 
-      // 2) Resolve the 190MB .data payload BEFORE the emscripten glue starts.
-      // On a warm OPFS this is a memory-speed read; on a cold cache it fetches
-      // once, stores in OPFS, then hands emscripten the same blob URL. The
-      // emscripten runtime will fetch the URL synchronously during preload —
-      // by returning a blob:, we bypass the network path entirely.
-      dataBlobUrl = await resolveDataBlobUrl(`${base}/sherpa-onnx-wasm-main-asr.data`);
+      // 2) Resolve the ~240MB .data payload via OPFS (memory-speed once cached).
+      dataBlobUrl = await resolveDataBlobUrl(`${base}/sherpa-onnx-wasm-main-vad-asr.data`);
 
-      // 3) install the Module contract emscripten expects, THEN inject the
-      // glue script. Order matters: emscripten's runtime reads window.Module
-      // synchronously at script-eval time to pick up locateFile + hooks.
+      // 3) Install the Module contract emscripten expects, then load glue.
       w.Module = w.Module || {};
       const M = w.Module!;
 
       M.locateFile = (path: string) => {
-        // Route the .data preload file at our OPFS-backed blob; everything else
-        // (the .wasm binary etc.) stays on the normal HTTP path — the wasm is
-        // only 19MB and disk cache handles it fine.
         const url = path.endsWith(".data") && dataBlobUrl
           ? dataBlobUrl
           : `${base}/${path}`;
@@ -274,15 +291,10 @@ export function ensureSherpaLoaded(): Promise<SherpaRecognizer> {
         return url;
       };
 
-      // Diagnostic heartbeat — emscripten silently stalls if a pthread worker
-      // can't spin up. Print module state every 2s until we're either ready
-      // or the promise rejects so we can see WHICH stage is stuck.
       const dumpTimer = setInterval(() => {
         console.log("[sherpa heartbeat]", {
           calledRun: (M as any).calledRun,
           runtimeInitialized: (M as any).runtimeInitialized,
-          preloadRunning: (M as any).preloadResources,
-          dataFileDownloads: (M as any).dataFileDownloads,
           crossOriginIsolated: typeof self !== "undefined" ? self.crossOriginIsolated : "n/a",
         });
       }, 2000);
@@ -316,42 +328,50 @@ export function ensureSherpaLoaded(): Promise<SherpaRecognizer> {
         }
         updateLoadState({ message: status });
       };
-
-      // Capture EVERYTHING emscripten writes so we can see the pthread /
-      // wasm instantiation trace if something fails silently.
       M.print = (msg: string) => console.log("[sherpa print]", msg);
       M.printErr = (msg: string) => console.warn("[sherpa printErr]", msg);
 
-      await loadScript(`${base}/sherpa-onnx-wasm-main-asr.js`);
+      await loadScript(`${base}/sherpa-onnx-wasm-main-vad-asr.js`);
       await initReady;
 
-      // Emscripten has finished consuming the .data blob. Release it so the
-      // 190MB doesn't sit pinned in the JS heap forever.
+      // .data 已经进入 emscripten FS,可以 revoke blob URL 释放内存
       if (dataBlobUrl) {
         URL.revokeObjectURL(dataBlobUrl);
         dataBlobUrl = null;
       }
 
-      if (typeof w.createOnlineRecognizer !== "function") {
-        throw new Error("createOnlineRecognizer missing after script load");
+      if (typeof w.OfflineRecognizer !== "function") {
+        throw new Error("OfflineRecognizer missing after script load");
       }
-      const rec = w.createOnlineRecognizer(M);
+
+      // Build offline recognizer once, share across engine instances.
+      // SenseVoice small,useInverseTextNormalization=1 让阿拉伯数字/标点
+      // 自动规范化(比如 "五十" → "50"),更适合字幕/翻译输入.
+      const recognizerConfig = {
+        modelConfig: {
+          debug: 1,
+          tokens: "./tokens.txt",
+          senseVoice: {
+            model: "./sense-voice.onnx",
+            useInverseTextNormalization: 1,
+          },
+        },
+      };
+      const recognizer = new w.OfflineRecognizer!(recognizerConfig, M);
+
       updateLoadState({ phase: "ready", message: "识别就绪" });
-      return rec;
+      return { Module: M, recognizer };
     } catch (e: any) {
       if (dataBlobUrl) { try { URL.revokeObjectURL(dataBlobUrl); } catch { /* ignore */ } }
-      recognizerPromise = null;
+      envPromise = null;
       updateLoadState({ phase: "error", error: e?.message || String(e) });
       throw e;
     }
   })();
 
-  return recognizerPromise;
+  return envPromise;
 }
 
-// Explicit preload hook — used by RoomClient to start the download before the
-// user toggles subtitles, so the first sentence isn't preceded by a cold
-// 174MB fetch.
 export function preloadSherpa(): Promise<void> {
   return ensureSherpaLoaded().then(() => undefined);
 }
@@ -387,60 +407,59 @@ export function createSherpaEngine(
   let audioCtx: AudioContext | null = null;
   let source: MediaStreamAudioSourceNode | null = null;
   let processor: ScriptProcessorNode | null = null;
-  let recognizer: SherpaRecognizer | null = null;
-  let recStream: SherpaStream | null = null;
+  let env: SherpaEnv | null = null;
+  let vad: VadHandle | null = null;
+  let buffer: CircularBufferHandle | null = null;
   let running = false;
   let actualRate = SAMPLE_RATE;
-  // Track the last text hypothesis so we only emit onResult when it changes.
-  // sherpa's getResult() returns an accumulating hypothesis every tick, so a
-  // dumb pass-through would fire dozens of identical interim events per second.
-  let lastText = "";
-  let sawTranscript = false;
-
-  const emit = (text: string, isFinal: boolean) => {
-    const trimmed = text.trim();
-    if (!trimmed) return;
-    if (!sawTranscript) {
-      sawTranscript = true;
-      onStatus?.(isFinal ? "listening" : "speaking");
-    }
-    onResult({ text: trimmed, lang, engine: "sherpa", isFinal });
-  };
+  let speakingActive = false; // 是否处于 "说话中"
 
   const handleAudio = (input: Float32Array) => {
-    if (!recognizer || !recStream) return;
+    if (!vad || !buffer || !env) return;
     const samples = actualRate === SAMPLE_RATE
       ? input
       : downsampleTo16k(input, actualRate);
-    let stage: string = "start";
     try {
-      stage = "acceptWaveform";
-      recStream.acceptWaveform(SAMPLE_RATE, samples);
-      stage = "isReady/decode";
-      while (recognizer.isReady(recStream)) {
-        recognizer.decode(recStream);
-      }
-      stage = "getResult";
-      const text = recognizer.getResult(recStream).text || "";
-      stage = "isEndpoint";
-      const endpoint = recognizer.isEndpoint(recStream);
+      buffer.push(samples);
+      const windowSize = vad.config.sileroVad.windowSize;
+      while (buffer.size() > windowSize) {
+        const chunk = buffer.get(buffer.head(), windowSize);
+        vad.acceptWaveform(chunk);
+        buffer.pop(windowSize);
 
-      if (text !== lastText) {
-        lastText = text;
-        emit(text, false);
-      }
+        // 状态转换:是否在说话.用于 UI "..." 提示.
+        const nowSpeaking = vad.isDetected();
+        if (nowSpeaking && !speakingActive) {
+          speakingActive = true;
+          onStatus?.("speaking");
+        } else if (!nowSpeaking && speakingActive) {
+          speakingActive = false;
+          onStatus?.("listening");
+        }
 
-      if (endpoint) {
-        stage = "reset";
-        if (text) emit(text, true);
-        recognizer.reset(recStream);
-        lastText = "";
-        sawTranscript = false;
-        onStatus?.("listening");
+        // 有已完成的 segment 就跑 offline recognizer
+        while (!vad.isEmpty()) {
+          const segment = vad.front();
+          vad.pop();
+          try {
+            const stream = env.recognizer.createStream();
+            stream.acceptWaveform(SAMPLE_RATE, segment.samples);
+            env.recognizer.decode(stream);
+            const raw = env.recognizer.getResult(stream);
+            const text = (raw.text || "").trim();
+            stream.free?.();
+            if (text) {
+              onResult({ text, lang, engine: "sherpa", isFinal: true });
+            }
+          } catch (e: any) {
+            console.error("[sherpa] recognize segment failed:", e);
+            onError?.(`recognize: ${e?.message || String(e)}`);
+          }
+        }
       }
     } catch (e: any) {
-      console.error(`[sherpa] error at stage=${stage}:`, e, "actualRate=", actualRate, "samples.len=", samples.length);
-      onError?.(`${stage}: ${e?.message || String(e)}`);
+      console.error("[sherpa] pipeline error:", e);
+      onError?.(String(e?.message || e));
     }
   };
 
@@ -450,25 +469,28 @@ export function createSherpaEngine(
       running = true;
       onStatus?.("starting");
       try {
-        recognizer = await ensureSherpaLoaded();
-        if (!running) return; // stop() beat us
-        recStream = recognizer.createStream();
-        lastText = "";
-        sawTranscript = false;
+        env = await ensureSherpaLoaded();
+        if (!running) return; // stop() 抢先
+
+        const w = window as unknown as SherpaGlobal;
+        if (typeof w.createVad !== "function" || typeof w.CircularBuffer !== "function") {
+          throw new Error("VAD/CircularBuffer wrappers missing");
+        }
+
+        // 每个 engine 实例独立 vad + buffer(vad 有内部状态,共享会串音)
+        vad = w.createVad!(env.Module);
+        buffer = new w.CircularBuffer!(30 * SAMPLE_RATE, env.Module);
+        speakingActive = false;
 
         audioCtx = new AudioContext({ sampleRate: SAMPLE_RATE });
         actualRate = audioCtx.sampleRate;
         console.log("[sherpa] AudioContext sampleRate requested=16000 actual=", actualRate);
 
         source = audioCtx.createMediaStreamSource(micStream);
-        // ScriptProcessorNode is deprecated but still universally supported and
-        // matches the official sherpa-onnx web demo — swapping to AudioWorklet
-        // means shipping a separate worklet file for a marginal quality win.
         processor = audioCtx.createScriptProcessor(4096, 1, 1);
         processor.onaudioprocess = (e) => {
           if (!running) return;
           const buf = e.inputBuffer.getChannelData(0);
-          // Copy — the underlying buffer is reused by the AudioContext.
           const copy = new Float32Array(buf.length);
           copy.set(buf);
           handleAudio(copy);
@@ -489,15 +511,14 @@ export function createSherpaEngine(
       try { processor?.disconnect(); } catch { /* ignore */ }
       try { source?.disconnect(); } catch { /* ignore */ }
       try { audioCtx?.close(); } catch { /* ignore */ }
-      // Explicitly free the stream if the underlying binding exposes it —
-      // otherwise emscripten's arena grows one stream per session until GC.
-      try { recStream?.free?.(); } catch { /* ignore */ }
+      try { vad?.free(); } catch { /* ignore */ }
+      try { buffer?.free(); } catch { /* ignore */ }
       processor = null;
       source = null;
       audioCtx = null;
-      recStream = null;
-      lastText = "";
-      sawTranscript = false;
+      vad = null;
+      buffer = null;
+      speakingActive = false;
     },
   };
 }
