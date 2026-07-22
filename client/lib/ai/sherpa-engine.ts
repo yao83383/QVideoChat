@@ -399,14 +399,25 @@ function ensureSherpaLoaded(): Promise<SherpaEnv> {
           },
         },
       };
-      const recognizer = new w.OfflineRecognizer!(recognizerConfig, M);
+      const Ctor = w.OfflineRecognizer;
+      if (typeof Ctor !== "function") {
+        throw new Error(
+          `OfflineRecognizer missing after script load. `
+          + `typeof=${typeof Ctor}. `
+          + `window keys with 'ffline'=${Object.keys(window).filter((k) => /ffline/i.test(k)).join(",")}`,
+        );
+      }
+      const recognizer = new Ctor(recognizerConfig, M);
 
       updateLoadState({ phase: "ready", message: "识别就绪" });
       return { Module: M, recognizer };
     } catch (e: any) {
       if (dataBlobUrl) { try { URL.revokeObjectURL(dataBlobUrl); } catch { /* ignore */ } }
-      envPromise = null;
+      // 不清 envPromise —— 一旦初始化 flow 失败,不要让下一次
+      // preloadSherpa/ensureSherpaLoaded 重跑整个 190MB 加载,让 error
+      // 显式暴露给 UI.用户刷新页面来重试.
       updateLoadState({ phase: "error", error: e?.message || String(e) });
+      console.error("[sherpa] init failed:", e);
       throw e;
     }
   })();
