@@ -32,6 +32,7 @@ interface TabDef {
 const TABS: TabDef[] = [
   { href: "/", label: "首页", icon: "🏠", exact: true },
   { href: "/friends", label: "好友", icon: "👥" },
+  { href: "/tools", label: "工具", icon: "🛠" },
   { href: "/me", label: "我", icon: "👤" },
 ];
 
