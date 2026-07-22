@@ -227,10 +227,17 @@ export function isLoggedIn(): boolean {
 }
 
 // Report
-export async function reportUser(targetUserId: string, roomId: string, reason: string) {
+// transcript: JSON.stringify 的 TranscriptEntry[](5 min ASR 缓冲).
+// 传空字符串 = 老客户端 / 举报时没缓冲的场景.
+export async function reportUser(
+  targetUserId: string,
+  roomId: string,
+  reason: string,
+  transcript: string = "",
+) {
   return request<{ ok: boolean }>("/api/reports/report", {
     method: "POST",
-    body: JSON.stringify({ targetUserId, roomId, reason }),
+    body: JSON.stringify({ targetUserId, roomId, reason, transcript }),
   });
 }
 

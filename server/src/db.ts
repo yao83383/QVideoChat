@@ -87,6 +87,7 @@ function initTables(db: Database.Database) {
       targetUserId TEXT NOT NULL,
       roomId      TEXT NOT NULL,
       reason      TEXT DEFAULT '',
+      transcript  TEXT DEFAULT '',
       createdAt   INTEGER NOT NULL DEFAULT (unixepoch() * 1000),
       FOREIGN KEY (fromUserId) REFERENCES users(userId),
       FOREIGN KEY (targetUserId) REFERENCES users(userId)
@@ -117,6 +118,10 @@ function initTables(db: Database.Database) {
   try { db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_users_phone ON users(phone) WHERE phone IS NOT NULL AND phone != ''"); } catch {}
   try { db.exec("ALTER TABLE users ADD COLUMN gender TEXT NOT NULL DEFAULT ''"); } catch {}
   try { db.exec("ALTER TABLE users ADD COLUMN avatarId TEXT NOT NULL DEFAULT ''"); } catch {}
+
+  // Reports: transcript column added in v1.4.0.005 —— 举报 5min ASR
+  // 逐字审核证据.老 DB 里没有这列,ALTER 补一次.
+  try { db.exec("ALTER TABLE reports ADD COLUMN transcript TEXT NOT NULL DEFAULT ''"); } catch {}
 
   // Invitation system (slice J). displayId is the user-facing 11-digit (or
   // 4-10 for OFFICIAL bloodline) account number, assigned only after an
@@ -486,11 +491,11 @@ export function unbanDevice(deviceId: string) {
   d.prepare("DELETE FROM banned_devices WHERE deviceId=?").run(deviceId);
 }
 
-export function createReport(fromUserId: string, targetUserId: string, roomId: string, reason = "") {
+export function createReport(fromUserId: string, targetUserId: string, roomId: string, reason = "", transcript = "") {
   const d = getDb();
   d.prepare(
-    "INSERT INTO reports (fromUserId, targetUserId, roomId, reason) VALUES (?, ?, ?, ?)",
-  ).run(fromUserId, targetUserId, roomId, reason);
+    "INSERT INTO reports (fromUserId, targetUserId, roomId, reason, transcript) VALUES (?, ?, ?, ?, ?)",
+  ).run(fromUserId, targetUserId, roomId, reason, transcript);
 }
 
 // Get all users by device (for banning all accounts on a device)

@@ -19,6 +19,7 @@ import { getSettings } from "@/components/SettingsModal";
 import { useFaceMesh } from "@/hooks/useFaceMesh";
 import { usePeer } from "@/hooks/usePeer";
 import { useSocket } from "@/hooks/useSocket";
+import { useTranscriptBuffer } from "@/hooks/useTranscriptBuffer";
 import { reportUser } from "@/lib/api";
 import { createSherpaEngine, preloadSherpa, onSherpaLoadChange, type SherpaLoadState } from "@/lib/ai/sherpa-engine";
 import { translateText, preloadPair } from "@/lib/ai/translate";
@@ -206,6 +207,10 @@ export default function RoomClient() {
 
   const peer = usePeer(blendshapeRef, signaling, poseRef, myAvatarConfigRef, myVrmPathRef);
 
+  // 5-min ASR 缓冲(自己 + 对方合并,按时序).通话中 ASR 持续写,
+  // 举报时 snapshot() 打包送后台.换 partner / handleNext 时 clear.
+  const transcript = useTranscriptBuffer();
+
   useEffect(() => {
     onOfferRef.current = peer.handleIncomingOffer;
     onAnswerRef.current = peer.handleIncomingAnswer;
@@ -374,18 +379,15 @@ export default function RoomClient() {
     });
   }, [translateEnabled, sourceLang, targetLang]);
 
-  // Kick off the sherpa-onnx WASM bundle download the moment ASR is
-  // wanted (subtitle OR translate). ~209MB, browser-cached; front-loading
-  // means the mic → recognizer path in the effect below sees a hot module.
-  const asrWanted = subtitleEnabled || translateEnabled;
+  // Kick off the sherpa-onnx WASM bundle download the moment we hit the
+  // room —— ASR 常跑,不受字幕/翻译按钮控制;209MB 只下一次(浏览器缓存).
   useEffect(() => {
-    if (!asrWanted) return;
     console.log('[room] preloadSherpa');
     preloadSherpa().catch((e) => {
       console.error('[room] preloadSherpa failed:', e);
       setAsrError(`识别模型加载失败: ${e?.message || e}`);
     });
-  }, [asrWanted]);
+  }, []);
 
   // Subscribe to sherpa download/init progress so we can show a real progress
   // bar in the subtitle panel instead of a mysterious "starting..." spinner
@@ -401,10 +403,11 @@ export default function RoomClient() {
   useEffect(() => { sendTranslationRef.current = peer.sendTranslation; }, [peer.sendTranslation]);
 
   useEffect(() => {
-    // 启动 ASR 的条件:字幕 OR 翻译 至少开一个,且通话已连接、麦克风开.
-    // ASR 是本地 sherpa,不占 server;两按钮任一 on 就跑,off 全关.
-    // (下一步块 C 会改成"ASR 常跑 for report 缓冲,按钮只控显示")
-    if (!asrWanted || !peer.isConnected || !peer.isMicOn) {
+    // ASR 常跑 —— 只要通话已连接 + 麦克风开就启动,和字幕/翻译按钮
+    // 无关.按钮只控字幕行显不显示,ASR 结果继续写举报缓冲.
+    // 麦克风静音时停 ASR,一是没音源意义,二是 UI 上"麦克风关"用户
+    // 期望不再产生 transcript.
+    if (!peer.isConnected || !peer.isMicOn) {
       setMySourceText(null);
       setMyTranslatedText(null);
       setAsrError(null);
@@ -431,8 +434,14 @@ export default function RoomClient() {
         const tgt = targetLangRef.current;
 
         // sherpa emits both interim (updating hypothesis) and final
-        // (isEndpoint) segments. Show all as source text.
+        // (isEndpoint) segments. 显示走 interim,举报缓冲只吃 final.
         setMySourceText(result.text);
+        transcript.append(
+          { speakerUserId: userId, text: result.text, ts: Date.now() },
+          !!result.isFinal,
+        );
+
+        // DC 一直发,让对方能显示我的原文/译文;是否显示由对方按钮控制.
         sendTranslationRef.current({
           text: "",
           sourceText: result.text,
@@ -443,7 +452,8 @@ export default function RoomClient() {
 
         if (!result.isFinal) return;
 
-        // 翻译分支:只在 translateEnabled 时才跑.字幕开+翻译关 → 只显示原文,不请求翻译.
+        // 翻译分支:只在 translateEnabled 时才实际调 translateText.
+        // 关翻译按钮时省 CPU + 省内存,但原文照样送 DC 给对方.
         if (!translateEnabled) return;
 
         if (sourceLang === tgt) {
@@ -499,21 +509,31 @@ export default function RoomClient() {
       cancelled = true;
       engine.stop();
     };
-  }, [asrWanted, translateEnabled, peer.isConnected, peer.isMicOn, sourceLang, peer.localAudioStream]);
+  }, [peer.isConnected, peer.isMicOn, sourceLang, peer.localAudioStream, translateEnabled, userId, transcript]);
 
-  // Receive peer translations via DataChannel (event-driven, not polled).
-  // 两按钮任一打开时都需要收 —— 字幕收原文,翻译收译文,组件层做过滤.
+  // 对方译文 DC 订阅 —— 无论字幕/翻译按钮开关都订阅,因为:
+  //   1. transcript buffer 常写,对方原文要一直吃(用来举报证据)
+  //   2. 按钮开关只控 SubtitleOverlay 是否渲染,不控数据流入
+  useEffect(() => {
+    return peer.onRemoteTranslation((msg) => {
+      if (msg.sourceText) {
+        setPeerSourceText(msg.sourceText);
+        transcript.append(
+          { speakerUserId: puid, text: msg.sourceText, ts: Date.now() },
+          !!msg.isFinal,
+        );
+      }
+      if (msg.text) setPeerTranslatedText(msg.text);
+    });
+  }, [peer.onRemoteTranslation, puid, transcript]);
+
+  // 按钮全关时清一下 peer 显示文本,避免上次的字幕残留在屏幕
   useEffect(() => {
     if (!subtitleEnabled && !translateEnabled) {
       setPeerSourceText(null);
       setPeerTranslatedText(null);
-      return;
     }
-    return peer.onRemoteTranslation((msg) => {
-      if (msg.sourceText) setPeerSourceText(msg.sourceText);
-      if (msg.text) setPeerTranslatedText(msg.text);
-    });
-  }, [subtitleEnabled, translateEnabled, peer.onRemoteTranslation]);
+  }, [subtitleEnabled, translateEnabled]);
 
   // --- Emote ---
   //
@@ -603,6 +623,7 @@ export default function RoomClient() {
   const handleHangup = () => {
     if (roomId) socket.leaveRoom(roomId);
     peer.disconnect();
+    transcript.clear();
     router.push("/");
   };
 
@@ -624,6 +645,8 @@ export default function RoomClient() {
     // the partner slot back in once the server matches us.
     if (roomId) socket.leaveRoom(roomId);
     peer.disconnect();
+    // 换 partner 就清 transcript,避免上一轮内容被算作新对方的证据.
+    transcript.clear();
     setRoomId("");
     setPuid("");
     setPname("对方");
@@ -654,13 +677,13 @@ export default function RoomClient() {
     setFriendStatus("friends");
   };
 
-  // Categorized report submit. Piggybacks the existing reportUser API — the
-  // server just gets a labeled string in the reason slot now — and auto-adds
-  // the partner to the local blocklist so the next-match handler skips them.
+  // Categorized report submit. transcript 5min ASR 缓冲一并送后台;
+  // 老 report 结构只发 reason,现在多一个 field 让审核人看到"聊了什么".
   const handleReportSubmit = (categoryKey: ReportCategory, freeText: string) => {
     const label = REPORT_CATEGORIES.find((c) => c.key === categoryKey)?.label ?? categoryKey;
     const reason = categoryKey === "other" ? `${label}: ${freeText}` : label;
-    reportUser(puid, roomId, reason);
+    const transcriptPayload = JSON.stringify(transcript.snapshot());
+    reportUser(puid, roomId, reason, transcriptPayload);
     if (puid) blockUser(puid);
     setReported(true);
     setShowReport(false);
