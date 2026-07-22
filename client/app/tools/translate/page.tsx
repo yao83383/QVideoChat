@@ -72,6 +72,10 @@ export default function TranslatePage() {
     phase: "idle", loaded: 0, total: 0, percent: 0,
   });
   const [modelLoading, setModelLoading] = useState(false);
+  // initializing 阶段等太久(>90s)时显示"刷新页面"提示 —— 首次真实场景
+  // 应该在 30-60s 内完成,超过就大概率有问题(网络断了 / 磁盘满了 /
+  // emscripten 挂 pthread worker 失败).
+  const [longWait, setLongWait] = useState(false);
 
   const turnIdRef = useRef(0);
   const listRef = useRef<HTMLDivElement>(null);
@@ -87,6 +91,15 @@ export default function TranslatePage() {
   }, []);
 
   useEffect(() => onSherpaLoadChange(setSherpaLoad), []);
+
+  // initializing 阶段 90s 超时 → 显示"刷新页面"提示.重置逻辑:每次
+  // phase 变都重设,ready 时永久隐藏.
+  useEffect(() => {
+    if (sherpaLoad.phase === "ready") { setLongWait(false); return; }
+    if (sherpaLoad.phase !== "initializing") { setLongWait(false); return; }
+    const t = setTimeout(() => setLongWait(true), 90_000);
+    return () => clearTimeout(t);
+  }, [sherpaLoad.phase]);
 
   useEffect(() => {
     return onLoadingChange((s) => {
@@ -237,7 +250,10 @@ export default function TranslatePage() {
         )}
       </header>
 
-      {/* 加载状态 —— 首次进入下载 sherpa + 翻译模型 */}
+      {/* 加载状态 —— 首次进入下载 sherpa + 翻译模型.
+          - downloading 显示 percent + MB(用户看到实际进度)
+          - initializing 显示 emscripten 报的 message + 预期语(降焦虑)
+          - 长时间(>90s)initializing 显示可刷新提示 */}
       {(sherpaLoad.phase === "downloading" || sherpaLoad.phase === "initializing") && (
         <div className="mb-3 rounded-xl bg-cyan-50 border border-cyan-200 p-3">
           <p className="text-xs text-cyan-800 font-medium">
@@ -250,12 +266,33 @@ export default function TranslatePage() {
               </span>
             )}
           </p>
+          {/* emscripten 具体阶段(挂载文件系统、初始化 worker 等)—— 让用户知道
+              程序确实在动,不是死掉了.空 message 或与主标题重复时不显示. */}
+          {sherpaLoad.message
+            && sherpaLoad.message !== "初始化识别引擎..."
+            && sherpaLoad.message !== "加载识别模型..." && (
+            <p className="text-[10px] text-cyan-700/80 mt-1 font-mono truncate">
+              {sherpaLoad.message}
+            </p>
+          )}
           <div className="mt-2 h-1 rounded-full bg-cyan-100 overflow-hidden">
             <div
               className={`h-full bg-cyan-500 transition-all ${sherpaLoad.phase === "initializing" ? "animate-pulse" : ""}`}
               style={{ width: `${sherpaLoad.phase === "initializing" ? 100 : sherpaLoad.percent}%` }}
             />
           </div>
+          <p className="text-[10px] text-cyan-600/70 mt-2">
+            首次约 30-60 秒 · 模型 ~200MB · 下次访问会从本地缓存直接启动
+          </p>
+          {longWait && (
+            <p className="text-[10px] text-amber-600 mt-1">
+              等太久了?试试 <button
+                type="button"
+                onClick={() => window.location.reload()}
+                className="underline hover:text-amber-800"
+              >刷新页面</button>
+            </p>
+          )}
         </div>
       )}
 
