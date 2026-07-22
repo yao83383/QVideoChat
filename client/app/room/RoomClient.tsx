@@ -3,15 +3,16 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import VrmAvatar, { type AvatarConfig } from "@/components/VrmAvatar";
-import MatchButton from "@/components/MatchButton";
 import VoiceStatus from "@/components/VoiceStatus";
 import LoginPrompt from "@/components/LoginPrompt";
 import TopicCard from "@/components/TopicCard";
-import LanguageSelector from "@/components/LanguageSelector";
 import EmoteBar from "@/components/EmoteBar";
 import FloatingEmoteLayer, { useFloatingEmotes, emojiForKey } from "@/components/FloatingEmoteLayer";
 import RecapCard, { type RecapState } from "@/components/RecapCard";
 import ReportModal, { REPORT_CATEGORIES, type ReportCategory } from "@/components/ReportModal";
+import PIPWindow from "@/components/PIPWindow";
+import CallToolbar from "@/components/CallToolbar";
+import SubtitleOverlay from "@/components/SubtitleOverlay";
 import { useSelectedAvatar } from "@/hooks/useSelectedAvatar";
 import { isBlocked, blockUser, bumpBlocklistHit } from "@/lib/blocklist";
 import { getSettings } from "@/components/SettingsModal";
@@ -73,6 +74,18 @@ export default function RoomClient() {
   const [sourceLang, setSourceLang] = useState(() => loadPref("qv_sl", "zh"));
   const [targetLang, setTargetLang] = useState(() => loadPref("qv_tl", "en"));
   const [subtitleEnabled, setSubtitleEnabled] = useState(false);
+  // 翻译独立开关(用户 2026-07-22 明确):字幕控制显不显示原文,
+  // 翻译控制翻不翻译并显示译文.两者独立.历史上 subtitleEnabled 同时
+  // 承载两件事,现在 translateEnabled 拆出来;translateText 的实际
+  // 触发条件在 pipeline 中改为 (subtitleEnabled || translateEnabled)
+  // AND translateEnabled.
+  const [translateEnabled, setTranslateEnabled] = useState(false);
+  // 主从互换 —— 单击 PIP 切换.默认 false = 大对方 / 小自己(微信风格).
+  const [swapped, setSwapped] = useState(false);
+  // 自己视图镜像开关.PIP 里镜像通常更自然(像照镜子),用户可在
+  // 更多菜单里 toggle.
+  const [selfMirrored, setSelfMirrored] = useState(true);
+  const [showMoreMenu, setShowMoreMenu] = useState(false);
   const [translating, setTranslating] = useState(false);
   const [modelLoading, setModelLoading] = useState(false);
   const [modelProgress, setModelProgress] = useState(0);
@@ -347,11 +360,11 @@ export default function RoomClient() {
     });
   }, []);
 
-  // Preload translation model(s) as soon as subtitle is enabled OR the pair
+  // Preload translation model(s) as soon as translation is enabled OR the pair
   // changes. This is the biggest single win for perceived latency — the first
   // spoken sentence no longer waits on a cold-start download.
   useEffect(() => {
-    if (!subtitleEnabled) return;
+    if (!translateEnabled) return;
     if (sourceLang === targetLang) return;
     console.log('[room] preloadPair', sourceLang, '→', targetLang);
     setTranslateError(null);
@@ -359,20 +372,20 @@ export default function RoomClient() {
       console.error('[room] preloadPair failed:', e);
       setTranslateError(`模型加载失败: ${e?.message || e}`);
     });
-  }, [subtitleEnabled, sourceLang, targetLang]);
+  }, [translateEnabled, sourceLang, targetLang]);
 
-  // Kick off the sherpa-onnx WASM bundle download the moment subtitles are
-  // enabled. It's ~209MB (wasm+data) and only downloads once — the browser
-  // caches it via the /sherpa-asr/ immutable header — so front-loading here
+  // Kick off the sherpa-onnx WASM bundle download the moment ASR is
+  // wanted (subtitle OR translate). ~209MB, browser-cached; front-loading
   // means the mic → recognizer path in the effect below sees a hot module.
+  const asrWanted = subtitleEnabled || translateEnabled;
   useEffect(() => {
-    if (!subtitleEnabled) return;
+    if (!asrWanted) return;
     console.log('[room] preloadSherpa');
     preloadSherpa().catch((e) => {
       console.error('[room] preloadSherpa failed:', e);
       setAsrError(`识别模型加载失败: ${e?.message || e}`);
     });
-  }, [subtitleEnabled]);
+  }, [asrWanted]);
 
   // Subscribe to sherpa download/init progress so we can show a real progress
   // bar in the subtitle panel instead of a mysterious "starting..." spinner
@@ -388,11 +401,10 @@ export default function RoomClient() {
   useEffect(() => { sendTranslationRef.current = peer.sendTranslation; }, [peer.sendTranslation]);
 
   useEffect(() => {
-    // Stop ASR whenever any of these is false: subtitle off, disconnected,
-    // OR mic muted. Web Speech API opens its own mic stream separately from
-    // WebRTC, so muting peer.audioTrack doesn't stop it — we must halt the
-    // recognizer explicitly, otherwise "muted" partner still gets our captions.
-    if (!subtitleEnabled || !peer.isConnected || !peer.isMicOn) {
+    // 启动 ASR 的条件:字幕 OR 翻译 至少开一个,且通话已连接、麦克风开.
+    // ASR 是本地 sherpa,不占 server;两按钮任一 on 就跑,off 全关.
+    // (下一步块 C 会改成"ASR 常跑 for report 缓冲,按钮只控显示")
+    if (!asrWanted || !peer.isConnected || !peer.isMicOn) {
       setMySourceText(null);
       setMyTranslatedText(null);
       setAsrError(null);
@@ -419,8 +431,7 @@ export default function RoomClient() {
         const tgt = targetLangRef.current;
 
         // sherpa emits both interim (updating hypothesis) and final
-        // (isEndpoint) segments. Show all as source text; only translate on
-        // final.
+        // (isEndpoint) segments. Show all as source text.
         setMySourceText(result.text);
         sendTranslationRef.current({
           text: "",
@@ -431,6 +442,9 @@ export default function RoomClient() {
         });
 
         if (!result.isFinal) return;
+
+        // 翻译分支:只在 translateEnabled 时才跑.字幕开+翻译关 → 只显示原文,不请求翻译.
+        if (!translateEnabled) return;
 
         if (sourceLang === tgt) {
           setMyTranslatedText(result.text);
@@ -485,11 +499,12 @@ export default function RoomClient() {
       cancelled = true;
       engine.stop();
     };
-  }, [subtitleEnabled, peer.isConnected, peer.isMicOn, sourceLang, peer.localAudioStream]);
+  }, [asrWanted, translateEnabled, peer.isConnected, peer.isMicOn, sourceLang, peer.localAudioStream]);
 
   // Receive peer translations via DataChannel (event-driven, not polled).
+  // 两按钮任一打开时都需要收 —— 字幕收原文,翻译收译文,组件层做过滤.
   useEffect(() => {
-    if (!subtitleEnabled) {
+    if (!subtitleEnabled && !translateEnabled) {
       setPeerSourceText(null);
       setPeerTranslatedText(null);
       return;
@@ -498,7 +513,7 @@ export default function RoomClient() {
       if (msg.sourceText) setPeerSourceText(msg.sourceText);
       if (msg.text) setPeerTranslatedText(msg.text);
     });
-  }, [subtitleEnabled, peer.onRemoteTranslation]);
+  }, [subtitleEnabled, translateEnabled, peer.onRemoteTranslation]);
 
   // --- Emote ---
   //
@@ -699,344 +714,237 @@ export default function RoomClient() {
     );
   }
 
+  // 主视图 / PIP 视图的两个渲染函数.数据源不变;唯一区别是 size + mirror.
+  // swapped=false 默认:主 = 对方,PIP = 自己(微信风格).
+  const renderSelf = (size: number) => {
+    if (!isCameraOn) {
+      return (
+        <div
+          className="w-full h-full flex items-center justify-center bg-slate-800"
+          style={{ minWidth: size, minHeight: size }}
+        >
+          <span className="text-white/40 text-4xl">📷</span>
+        </div>
+      );
+    }
+    return (
+      <VrmAvatar
+        blendshapeRef={blendshapeRef}
+        poseRef={poseRef}
+        size={size}
+        vrmPath={selectedEntry.vrmPath}
+        placeholderEmoji={selectedEntry.emoji}
+        placeholderTint={selectedEntry.tint}
+        mirror={selfMirrored}
+        onConfigChange={handleMyConfigChange}
+      />
+    );
+  };
+  const renderPeer = (size: number) => {
+    if (searching || !roomId) {
+      return (
+        <div
+          className="w-full h-full flex flex-col items-center justify-center gap-3 bg-slate-900"
+          style={{ minWidth: size, minHeight: size }}
+        >
+          <div className="h-8 w-8 animate-spin rounded-full border-2 border-white/20 border-t-white/70" />
+          <span className="text-white/60 text-xs">等待接入</span>
+        </div>
+      );
+    }
+    return (
+      <VrmAvatar
+        blendshapeRef={peer.remoteBlendshapeRef}
+        poseRef={peer.remotePoseRef}
+        externalConfigRef={peer.remoteAvatarConfigRef}
+        vrmPath={peer.remoteVrmPath ?? undefined}
+        size={size}
+        muted={partnerLeft}
+      />
+    );
+  };
+
+  // 主区大小 —— 撑满视口(减去 tab 栏和顶栏).对于 3D 化身 260 足够;
+  // 后期换真视频流时改成 100% 容器即可.PIP 固定 112×160 也够表意.
+  const MAIN_SIZE = 320;
+  const PIP_W = 112;
+  const PIP_H = 160;
+
+  // "主"和"小窗"里装谁 —— swapped 是 UI 状态,数据源不变.
+  const MainView = swapped ? renderSelf : renderPeer;
+  const PipView = swapped ? renderPeer : renderSelf;
+  const pipIsSelf = !swapped;
+
   return (
-    <main className="flex min-h-screen flex-col items-center justify-center gap-4 p-4">
+    <main className="relative min-h-screen bg-slate-950 text-white overflow-hidden">
       <audio ref={audioRef} autoPlay playsInline hidden />
-      <h1 className="text-xl font-bold tracking-tight text-slate-900">QVideoChat</h1>
 
-      {partnerLeft && !searching && (
-        <p className="rounded-lg bg-amber-100 border border-amber-300 px-4 py-2 text-amber-800 text-sm font-medium">对方已离开房间</p>
-      )}
-      {searching && (
-        <div className="flex items-center gap-3 rounded-lg bg-sky-100 border border-sky-300 px-4 py-2 text-sky-700 text-sm font-medium">
-          <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-sky-500 border-t-transparent" />
-          <span>正在为你寻找下一位聊天对象...</span>
+      {/* 顶部状态条 —— 全部合并到一个 sticky 半透明栏,和视频画面不打架 */}
+      <header
+        className="fixed inset-x-0 top-0 z-30 flex items-center justify-between px-4 py-3 bg-gradient-to-b from-black/60 to-transparent pointer-events-none"
+        style={{ paddingTop: "calc(env(safe-area-inset-top, 0) + 0.75rem)" }}
+      >
+        <div className="flex items-center gap-2 pointer-events-auto">
+          <span className={`w-2 h-2 rounded-full ${peer.isConnected ? "bg-emerald-400" : "bg-amber-400 animate-pulse"}`} />
+          <span className="text-xs text-white/80 font-medium">
+            {peer.isConnecting ? "连接中..."
+              : peer.isConnected ? (getSettings().showId ? pname : "匿名用户")
+              : searching ? "寻找中..."
+              : roomReady ? "建立连接..."
+              : partnerReconnecting ? "对方重连中..."
+              : partnerLeft ? "对方已离开"
+              : "等待对方加入..."}
+          </span>
         </div>
-      )}
-      {partnerReconnecting && !partnerLeft && (
-        <p className="rounded-lg bg-sky-100 border border-sky-300 px-4 py-2 text-sky-700 text-sm font-medium">对方连接中断，等待重连...</p>
-      )}
-      {peer.error && (
-        peer.error.includes("Permission denied") || peer.error.includes("NotAllowedError") ? (
-          <div className="rounded-lg bg-rose-50 border border-rose-300 px-4 py-3 text-sm max-w-lg">
-            <p className="font-semibold text-rose-700 mb-1">🎤 麦克风权限被拒绝</p>
-            <p className="text-rose-600/90 text-xs leading-relaxed">
-              浏览器阻止了麦克风访问,双方无法通话。请点击浏览器地址栏左侧的 🔒 锁形图标 → 麦克风 → 改为"允许",然后刷新页面。
-            </p>
-          </div>
-        ) : (
-          <p className="text-rose-600 text-sm font-medium">{peer.error}</p>
-        )
-      )}
-
-      {topicText && <TopicCard text={topicText} category={topicCategory} />}
-
-      {friendStatus === "received" && !partnerLeft && (
-        <p className="rounded-lg bg-emerald-100 border border-emerald-300 px-4 py-2 text-emerald-700 text-xs font-medium">{pname} 想加你为好友</p>
-      )}
-
-      <div className="flex flex-col md:flex-row items-center md:items-start gap-4 md:gap-6 w-full max-w-xl md:max-w-none px-2">
-        {/* My avatar */}
-        <div className="flex flex-col items-center gap-2 w-full max-w-[280px] md:w-72">
-          {isCameraOn ? (
-            <VrmAvatar
-              blendshapeRef={blendshapeRef}
-              poseRef={poseRef}
-              size={260}
-              vrmPath={selectedEntry.vrmPath}
-              placeholderEmoji={selectedEntry.emoji}
-              placeholderTint={selectedEntry.tint}
-              mirror
-              onConfigChange={handleMyConfigChange}
-            />
-          ) : (
-            <div className="qv-dark-surface rounded-2xl flex items-center justify-center border border-white/10" style={{ width: 260, height: 260 }}>
-              <span className="text-white/40 text-5xl">📷</span>
-            </div>
-          )}
-          <VoiceStatus stream={peer.localAudioStream} label={getSettings().showId ? `${uname} (你)` : "匿名用户"} />
-
-          {/* My speech subtitle — always visible while subtitle is on, so
-              users see status even before any recognition/translation happens. */}
-          {subtitleEnabled && (
-            <div className="w-full rounded-lg bg-black/50 border border-white/10 px-3 py-2 text-center min-h-[36px] max-h-24 overflow-y-auto">
-              {mySourceText && (
-                <p className="text-white/70 text-[11px] leading-snug break-words">{mySourceText}</p>
-              )}
-              {modelLoading && !myTranslatedText && (
-                <div className="mt-1">
-                  <p className="text-yellow-300/80 text-[10px] italic">
-                    {modelProgress < 100
-                      ? `首次加载翻译模型 ${modelProgress > 0 ? modelProgress + '%' : ''}`
-                      : '初始化推理引擎...'}
-                    {modelBytes.total > 0 && modelProgress < 100 && (
-                      <span className="text-yellow-300/50 ml-1">
-                        ({(modelBytes.loaded / 1_048_576).toFixed(1)} / {(modelBytes.total / 1_048_576).toFixed(0)} MB)
-                      </span>
-                    )}
-                  </p>
-                  <div className="mt-1 h-1 rounded-full bg-yellow-900/30 overflow-hidden">
-                    <div
-                      className={`h-full transition-all duration-200 ${
-                        modelProgress >= 100 ? 'bg-yellow-400/70 animate-pulse' : 'bg-yellow-400/70'
-                      }`}
-                      style={{ width: `${modelProgress}%` }}
-                    />
-                  </div>
-                </div>
-              )}
-              {(sherpaLoad.phase === "downloading" || sherpaLoad.phase === "initializing") && (
-                <div className="mt-1">
-                  <p className="text-cyan-300/80 text-[10px] italic">
-                    {sherpaLoad.phase === "initializing"
-                      ? "初始化识别引擎..."
-                      : `首次加载识别模型 ${sherpaLoad.percent > 0 ? sherpaLoad.percent + '%' : ''}`}
-                    {sherpaLoad.total > 0 && sherpaLoad.phase === "downloading" && (
-                      <span className="text-cyan-300/50 ml-1">
-                        ({(sherpaLoad.loaded / 1_048_576).toFixed(1)} / {(sherpaLoad.total / 1_048_576).toFixed(0)} MB)
-                      </span>
-                    )}
-                  </p>
-                  <div className="mt-1 h-1 rounded-full bg-cyan-900/30 overflow-hidden">
-                    <div
-                      className={`h-full transition-all duration-200 bg-cyan-400/70 ${
-                        sherpaLoad.phase === "initializing" ? "animate-pulse" : ""
-                      }`}
-                      style={{ width: `${sherpaLoad.phase === "initializing" ? 100 : sherpaLoad.percent}%` }}
-                    />
-                  </div>
-                </div>
-              )}
-              {translating && !modelLoading && !myTranslatedText && (
-                <p className="text-white/30 text-[10px] italic">翻译中...</p>
-              )}
-              {translateError && (
-                <p className="text-red-400 text-[10px] italic mt-1">{translateError}</p>
-              )}
-              {asrError && !modelLoading && (
-                <p className="text-red-400 text-[10px] italic mt-1">语音识别: {asrError}</p>
-              )}
-              {!asrError && !mySourceText && sherpaLoad.phase === "ready" && (asrStatus === "starting" || asrStatus === "unavailable") && (
-                <p className="text-yellow-300/70 text-[10px] italic mt-1">
-                  {asrStatus === "starting" ? "正在启动语音识别..." : "该浏览器不支持语音识别"}
-                </p>
-              )}
-              {!asrError && asrStatus === "speaking" && !mySourceText && (
-                <p className="text-sky-300/70 text-[10px] italic mt-1">说话中...</p>
-              )}
-              {!asrError && asrStatus === "loading" && !mySourceText && (
-                <p className="text-yellow-300/70 text-[10px] italic mt-1">首次加载识别模型，请稍候...</p>
-              )}
-              {!asrError && asrStatus === "transcribing" && !mySourceText && (
-                <p className="text-white/40 text-[10px] italic mt-1">识别中...</p>
-              )}
-              {myTranslatedText && (
-                <p className="text-green-400 text-[11px] leading-snug break-words">{myTranslatedText}</p>
-              )}
-              {!mySourceText && !myTranslatedText && !translating && !modelLoading && !translateError && !asrError && (
-                !peer.isMicOn ? (
-                  <div className="flex items-center justify-center gap-2 py-1">
-                    <span className="text-2xl">🔇</span>
-                    <span className="text-red-400 text-xs font-medium">麦克风已静音</span>
-                  </div>
-                ) : (
-                  <p className="text-white/30 text-[10px] italic">开始说话...</p>
-                )
-              )}
-            </div>
-          )}
-        </div>
-
-        {/* Partner avatar */}
-        <div className="flex flex-col items-center gap-2 w-full max-w-[280px] md:w-72">
-          {searching || !roomId ? (
-            /*
-             * Partner ad/waiting slot. Reserved for a future ad board so the
-             * empty half of the screen earns revenue while the user waits for
-             * a match. To wire in ads: replace this <div> with an <AdBoard/>
-             * component sized 260×260, keep the same wrapper so layout is
-             * stable. VoiceStatus below already switches to a "寻找中..." label.
-             */
-            <div
-              className="qv-dark-surface rounded-2xl border border-white/10 flex flex-col items-center justify-center gap-3"
-              style={{ width: 260, height: 260 }}
-            >
-              <div className="h-8 w-8 animate-spin rounded-full border-2 border-white/20 border-t-white/70" />
-              <span className="text-white/60 text-xs">等待接入</span>
-            </div>
-          ) : (
-            <VrmAvatar
-              blendshapeRef={peer.remoteBlendshapeRef}
-              poseRef={peer.remotePoseRef}
-              externalConfigRef={peer.remoteAvatarConfigRef}
-              vrmPath={peer.remoteVrmPath ?? undefined}
-              size={260}
-              muted={partnerLeft}
-            />
-          )}
-          {searching || !roomId ? (
-            <span className="text-xs text-slate-500">寻找中...</span>
-          ) : (
-            <VoiceStatus stream={peer.remoteAudioStream} label={`${pname} (对方)`} muted={partnerLeft} />
-          )}
-
-          {/* Partner speech subtitle */}
-          {subtitleEnabled && (
-            <div className="w-full rounded-lg bg-black/50 border border-white/10 px-3 py-2 text-center min-h-[36px] max-h-24 overflow-y-auto">
-              {!peer.remoteMicOn ? (
-                <div className="flex items-center justify-center gap-2 py-1">
-                  <span className="text-2xl">🔇</span>
-                  <span className="text-red-400 text-xs font-medium">对方已静音</span>
-                </div>
-              ) : (
-                <>
-                  {peerSourceText && (
-                    <p className="text-white/70 text-[11px] leading-snug break-words">{peerSourceText}</p>
-                  )}
-                  {peerTranslatedText && (
-                    <p className="text-green-400 text-[11px] leading-snug break-words">{peerTranslatedText}</p>
-                  )}
-                  {!peerSourceText && !peerTranslatedText && (
-                    <p className="text-white/30 text-[10px] italic">等待对方发言...</p>
-                  )}
-                </>
-              )}
-            </div>
-          )}
-        </div>
-      </div>
-
-      <div className="flex items-center gap-3">
-        <span className={`text-xs font-medium ${peer.isConnected ? "text-emerald-600" : "text-slate-500"}`}>
-          {peer.isConnecting ? "连接中..." : peer.isConnected ? "已连接" : roomReady ? "建立连接..." : "等待对方加入..."}
-        </span>
-        <span className="text-xs text-slate-400">ICE: {peer.iceState}</span>
-        {!faceFound && isLoaded && (
-          <span className="text-xs text-amber-600 font-medium">未检测到人脸</span>
+        {friendStatus === "friends" && (
+          <span className="pointer-events-auto text-xs text-emerald-300/90">已是好友</span>
         )}
+      </header>
+
+      {/* 主视频区 —— 撑满,居中放化身/视频 */}
+      <div className="min-h-screen flex items-center justify-center">
+        <div
+          className="rounded-3xl overflow-hidden bg-slate-900 shadow-2xl"
+          style={{ width: MAIN_SIZE, height: MAIN_SIZE }}
+        >
+          {MainView(MAIN_SIZE)}
+        </div>
       </div>
 
-      {/* Media control row. Rendered unconditionally now (was gated on
-          cameraEverLoaded.current before) — a user who denied camera would
-          previously never see the buttons and had no way to retry the grant. */}
-      <div className="flex gap-2">
-        <button
-          onClick={toggleCamera}
-          title={camError ? "未授权,点击尝试授权" : isCameraOn ? "关闭摄像头" : "打开摄像头"}
-          className={`relative w-9 h-9 rounded-full flex items-center justify-center text-sm transition ${
-            isCameraOn
-              ? "bg-white border border-slate-300 text-slate-700 hover:border-sky-400 hover:text-sky-600 shadow-sm"
-              : camError
-              ? "bg-rose-100 border-2 border-rose-400 text-rose-700 hover:bg-rose-200"
-              : "bg-rose-50 border border-rose-300 text-rose-600"
-          }`}>
-          <span aria-hidden>📷</span>
-          {/* Red slash overlay marks "explicitly denied / errored" — visually
-              distinct from a plain off state so users understand the button
-              can retry the browser permission grant. */}
-          {!isCameraOn && camError && (
-            <span
-              className="absolute inset-0 flex items-center justify-center text-base font-bold text-rose-600 pointer-events-none"
-              aria-hidden
+      {/* PIP 小窗 —— 单击互换,拖拽换角,长按隐藏 */}
+      <PIPWindow
+        onSwap={() => setSwapped((v) => !v)}
+        width={PIP_W}
+        height={PIP_H}
+      >
+        <div className="relative w-full h-full">
+          {PipView(PIP_H)}
+          {/* 镜像按钮只在 PIP 装的是自己时显示 */}
+          {pipIsSelf && (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                setSelfMirrored((v) => !v);
+              }}
+              onPointerDown={(e) => e.stopPropagation()}
+              className="absolute top-1 right-1 w-6 h-6 rounded-full bg-black/50 hover:bg-black/70 text-white text-xs flex items-center justify-center backdrop-blur-sm z-10"
+              aria-label={selfMirrored ? "关闭镜像" : "开启镜像"}
+              title={selfMirrored ? "关闭镜像" : "开启镜像"}
             >
-              ✕
-            </span>
-          )}
-        </button>
-        <button
-          onClick={peer.toggleMic}
-          title={peer.isMicOn ? "静音" : "取消静音"}
-          className={`w-9 h-9 rounded-full flex items-center justify-center text-sm transition ${
-            peer.isMicOn ? "bg-white border border-slate-300 text-slate-700 hover:border-sky-400 hover:text-sky-600 shadow-sm" : "bg-rose-50 border border-rose-300 text-rose-600"
-          }`}>
-          🎙
-        </button>
-      </div>
-
-      <div className="flex items-center gap-3 flex-wrap justify-center">
-        {peer.isConnected && (
-          <LanguageSelector
-            sourceLang={sourceLang}
-            targetLang={targetLang}
-            subtitleEnabled={subtitleEnabled}
-            onSourceChange={handleSourceLangChange}
-            onTargetChange={handleTargetLangChange}
-            onSubtitleToggle={handleSubtitleToggle}
-          />
-        )}
-      </div>
-
-      {peer.isConnected && (
-        <p className="text-xs text-emerald-600/80 font-medium">语音已连接</p>
-      )}
-
-      {peer.isConnected && friendStatus === "none" && (
-        <button onClick={handleAddFriend}
-          className="rounded-lg bg-white border border-slate-300 px-4 py-1.5 text-xs text-slate-700 hover:border-sky-400 hover:text-sky-600 transition shadow-sm">
-          + 添加好友
-        </button>
-      )}
-
-      {peer.isConnected && friendStatus === "received" && (
-        <button onClick={handleAcceptFriend}
-          className="rounded-lg bg-gradient-to-r from-emerald-500 to-emerald-600 hover:from-emerald-600 hover:to-emerald-700 px-4 py-1.5 text-xs text-white font-semibold shadow shadow-emerald-500/30 transition">
-          接受好友请求
-        </button>
-      )}
-
-      {friendStatus === "sent" && (
-        <p className="text-xs text-slate-500">好友请求已发送</p>
-      )}
-
-      {friendStatus === "friends" && (
-        <p className="text-xs text-emerald-600 font-medium">已是好友</p>
-      )}
-
-      {showFriendPrompt && partnerLeft && (
-        <div className="flex items-center gap-3 rounded-lg bg-white/80 border border-sky-200 shadow-sm px-4 py-3">
-          <span className="text-xs text-slate-600">聊得开心吗？</span>
-          {friendStatus === "none" && (
-            <button onClick={handleAddFriend} className="rounded-lg bg-gradient-to-r from-sky-500 to-cyan-500 hover:from-sky-600 hover:to-cyan-600 text-white px-3 py-1 text-xs font-semibold shadow-sm shadow-sky-500/30">
-              加为好友
+              ⇋
             </button>
           )}
-          {friendStatus === "sent" && <span className="text-xs text-emerald-600 font-medium">已发送</span>}
-          {friendStatus === "friends" && <span className="text-xs text-emerald-600 font-medium">已是好友</span>}
+        </div>
+      </PIPWindow>
+
+      {/* 底端字幕 */}
+      <SubtitleOverlay
+        subtitleOn={subtitleEnabled}
+        translateOn={translateEnabled}
+        mySource={mySourceText}
+        myTranslated={myTranslatedText}
+        peerSource={peerSourceText}
+        peerTranslated={peerTranslatedText}
+        myName={getSettings().showId ? uname : "我"}
+        peerName={pname}
+      />
+
+      {/* 底部工具栏 */}
+      <CallToolbar
+        micOn={peer.isMicOn}
+        subtitleOn={subtitleEnabled}
+        translateOn={translateEnabled}
+        connected={peer.isConnected}
+        onToggleMic={peer.toggleMic}
+        onToggleSubtitle={() => setSubtitleEnabled((v) => !v)}
+        onToggleTranslate={() => setTranslateEnabled((v) => !v)}
+        onMore={() => setShowMoreMenu(true)}
+        onHangup={handleHangup}
+      />
+
+      {/* 更多菜单 —— emote / 加好友 / 下一个 / 举报 / 摄像头切换 */}
+      {showMoreMenu && (
+        <div
+          className="fixed inset-0 z-40 flex items-end justify-center bg-black/40 backdrop-blur-sm"
+          onClick={() => setShowMoreMenu(false)}
+        >
+          <div
+            className="w-full max-w-md bg-slate-900 border-t border-white/10 rounded-t-3xl p-5 pb-8 flex flex-col gap-4 text-white"
+            onClick={(e) => e.stopPropagation()}
+            style={{ paddingBottom: "calc(env(safe-area-inset-bottom, 0) + 2rem)" }}
+          >
+            <div className="w-10 h-1 bg-white/20 rounded-full mx-auto" />
+            {peer.isConnected && (
+              <div className="flex flex-col gap-2">
+                <p className="text-[10px] text-white/40 uppercase tracking-wider">表情反应</p>
+                <EmoteBar onSend={(k) => { handleEmoteSend(k); }} />
+              </div>
+            )}
+            <div className="grid grid-cols-2 gap-2">
+              <MoreItem
+                icon="📷"
+                label={isCameraOn ? "关摄像头" : "开摄像头"}
+                onClick={() => { toggleCamera(); setShowMoreMenu(false); }}
+              />
+              {peer.isConnected && friendStatus === "none" && (
+                <MoreItem
+                  icon="➕"
+                  label="加好友"
+                  onClick={() => { handleAddFriend(); setShowMoreMenu(false); }}
+                />
+              )}
+              {peer.isConnected && friendStatus === "received" && (
+                <MoreItem
+                  icon="✅"
+                  label="接受好友"
+                  onClick={() => { handleAcceptFriend(); setShowMoreMenu(false); }}
+                />
+              )}
+              {peer.isConnected && (
+                <MoreItem
+                  icon="⏭️"
+                  label={searching ? "寻找中..." : "下一个"}
+                  disabled={searching}
+                  onClick={() => { handleNext(); setShowMoreMenu(false); }}
+                />
+              )}
+              {!reported && (
+                <MoreItem
+                  icon="🚨"
+                  label="举报"
+                  danger
+                  onClick={() => { setShowMoreMenu(false); setShowReport(true); }}
+                />
+              )}
+            </div>
+          </div>
         </div>
       )}
 
-      {/* Emote bar: reactions during an active call. Sits above the primary
-          action row so a stray tap can't accidentally hit "下一个". */}
-      {peer.isConnected && (
-        <EmoteBar onSend={handleEmoteSend} />
+      {/* 顶部 toast:话题 / 好友请求 / 错误 —— 一次性,不常驻 */}
+      {topicText && (
+        <div className="fixed top-14 left-1/2 -translate-x-1/2 z-30 max-w-md w-[calc(100%-2rem)] pointer-events-auto">
+          <TopicCard text={topicText} category={topicCategory} />
+        </div>
       )}
-
-      <div className="flex gap-4 mt-2">
-        <button onClick={handleHangup}
-          className="rounded-lg bg-white border border-slate-300 px-4 py-2 text-sm text-slate-700 hover:border-rose-400 hover:text-rose-600 transition shadow-sm">
-          回主页
-        </button>
-        <button onClick={handleNext} disabled={searching}
-          className="rounded-lg bg-gradient-to-r from-sky-500 to-cyan-500 hover:from-sky-600 hover:to-cyan-600 text-white px-4 py-2 text-sm font-semibold shadow-lg shadow-sky-500/30 transition disabled:opacity-40 disabled:cursor-not-allowed">
-          {searching ? "寻找中..." : "下一个"}
-        </button>
-        {!reported && (
-          <button
-            type="button"
-            onClick={() => setShowReport(true)}
-            title="举报当前对方"
-            className="flex items-center gap-1.5 rounded-lg bg-rose-50 border border-rose-300 hover:bg-rose-100 hover:border-rose-400 text-rose-700 hover:text-rose-800 px-3 py-2 text-xs font-medium transition"
-          >
-            <span>🚨</span>
-            <span>举报</span>
-          </button>
-        )}
-        {reported && (
-          <span className="rounded-lg bg-white/80 border border-slate-200 px-3 py-2 text-xs text-slate-500">
-            已举报,已加入黑名单
-          </span>
-        )}
-      </div>
+      {friendStatus === "received" && !partnerLeft && (
+        <div className="fixed top-16 left-1/2 -translate-x-1/2 z-30 rounded-full bg-emerald-500/90 text-white text-xs px-4 py-1.5 shadow-lg backdrop-blur-sm">
+          {pname} 想加你为好友
+        </div>
+      )}
+      {peer.error && (
+        <div className="fixed top-16 left-1/2 -translate-x-1/2 z-30 max-w-md w-[calc(100%-2rem)] rounded-2xl bg-rose-500/90 text-white text-xs px-4 py-3 shadow-lg backdrop-blur-sm">
+          {peer.error.includes("Permission denied") || peer.error.includes("NotAllowedError")
+            ? "🎤 麦克风权限被拒绝 · 请在浏览器地址栏 🔒 图标里授权后刷新页面"
+            : peer.error}
+        </div>
+      )}
+      {reported && (
+        <div className="fixed top-16 left-1/2 -translate-x-1/2 z-30 rounded-full bg-slate-800/90 text-white/80 text-xs px-4 py-1.5 shadow-lg backdrop-blur-sm">
+          已举报,已加入黑名单
+        </div>
+      )}
 
       <LoginPrompt show={showLoginModal} onClose={() => setShowLoginModal(false)} />
       <FloatingEmoteLayer emotes={emotes} />
@@ -1057,5 +965,29 @@ export default function RoomClient() {
         />
       )}
     </main>
+  );
+}
+
+/** 更多菜单里的一个 grid 项. */
+function MoreItem({
+  icon, label, onClick, disabled, danger,
+}: {
+  icon: string; label: string; onClick: () => void; disabled?: boolean; danger?: boolean;
+}) {
+  const tone = disabled
+    ? "bg-white/5 text-white/30 cursor-not-allowed"
+    : danger
+    ? "bg-rose-500/20 hover:bg-rose-500/30 text-rose-100 border border-rose-500/40"
+    : "bg-white/10 hover:bg-white/20 text-white border border-white/10";
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      className={`flex flex-col items-center gap-1 rounded-2xl py-3 text-sm font-medium transition ${tone}`}
+    >
+      <span className="text-2xl">{icon}</span>
+      <span className="text-xs">{label}</span>
+    </button>
   );
 }

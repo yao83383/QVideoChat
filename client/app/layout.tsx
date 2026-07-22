@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import "./globals.css";
 import DesktopTitleBar from "@/components/DesktopTitleBar";
 import BottomTabBar from "@/components/BottomTabBar";
+import TabBarPad from "@/components/TabBarPad";
 import { SocketProvider } from "@/contexts/SocketContext";
 
 export const metadata: Metadata = {
@@ -16,18 +17,13 @@ export default function RootLayout({
 }) {
   return (
     <html lang="zh-CN">
-      {/* 全局给底部留 tab 栏高度 —— BottomTabBar 自己 hidden 的路由(通话页等)
-          也吃这条 padding,但空 62px 不影响布局,还省得每个 page 各自处理。 */}
-      <body className="min-h-screen pb-[62px]">
-        {/* Only paints inside Electron shell + outside /pet route. In a
-            plain browser tab this renders nothing and body's padding-top
-            stays whatever CSS said. */}
+      {/* body 只保证最小高度,padding-bottom 交给 TabBarPad 判断 —— 通话页
+          等 tab 隐藏的路由不需要这条 padding,否则 min-h-screen 加上会
+          让 body 变成 100vh+62px 出现滚动条. */}
+      <body className="min-h-screen">
         <DesktopTitleBar />
-        {/* App-wide socket: one connection for the whole app so friends see
-            each other's presence regardless of what page they're on. See
-            contexts/SocketContext.tsx for the rationale. */}
         <SocketProvider>
-          {children}
+          <TabBarPad>{children}</TabBarPad>
           <BottomTabBar />
         </SocketProvider>
       </body>
