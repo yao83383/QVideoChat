@@ -526,12 +526,70 @@ export function createSherpaEngine(
   let actualRate = SAMPLE_RATE;
   let speakingActive = false; // 是否处于 "说话中"
 
+  // Rolling interim(v1.4.0.014): SenseVoice 是 offline 模型不给流式,
+  // 我们自己在说话中每 INTERIM_INTERVAL_MS 拿一次"说话开始 → 现在"的
+  // 音频丢给 recognizer 出 interim,视觉上跟随说话跳字.VAD 判句末
+  // 时再拿完整段做 final 覆盖 interim.
+  //
+  // speakingSamples 累积当前说话中的所有 samples,VAD 状态从 true→false
+  // 时清空.interimBusy 保证同一时刻只有一个 recognizer.decode 在跑
+  // (SenseVoice 单次识别不并发),超过间隔但上次没跑完就直接 skip.
+  const INTERIM_INTERVAL_MS = 400;
+  const speakingSamples: Float32Array[] = [];
+  let speakingTotalLen = 0;
+  let lastInterimAt = 0;
+  let interimBusy = false;
+
+  /** 说话中定时触发 —— rolling 拿累积的 samples 丢 recognizer 出 interim. */
+  const maybeInterim = () => {
+    if (!env || !running) return;
+    if (interimBusy) return;
+    if (!speakingActive) return;
+    const now = Date.now();
+    if (now - lastInterimAt < INTERIM_INTERVAL_MS) return;
+    if (speakingTotalLen < SAMPLE_RATE * 0.3) return; // 太短没意义
+    lastInterimAt = now;
+    interimBusy = true;
+    // 拷贝一份 samples 副本 —— 因为要塞给 recognizer,别在跑的时候被
+    // 外面 push 打搅.
+    const merged = new Float32Array(speakingTotalLen);
+    let off = 0;
+    for (const s of speakingSamples) { merged.set(s, off); off += s.length; }
+    // 用 setTimeout(0) 让 audio callback 尽快返回,不阻塞下一 tick.
+    setTimeout(() => {
+      try {
+        const stream = env!.recognizer.createStream();
+        stream.acceptWaveform(SAMPLE_RATE, merged);
+        env!.recognizer.decode(stream);
+        const raw = env!.recognizer.getResult(stream);
+        const text = (raw.text || "").trim();
+        stream.free?.();
+        if (text && running) {
+          onResult({ text, lang, engine: "sherpa", isFinal: false });
+        }
+      } catch (e: any) {
+        console.warn("[sherpa] interim recognize failed:", e);
+      } finally {
+        interimBusy = false;
+      }
+    }, 0);
+  };
+
   const handleAudio = (input: Float32Array) => {
     if (!vad || !buffer || !env) return;
     const samples = actualRate === SAMPLE_RATE
       ? input
       : downsampleTo16k(input, actualRate);
     try {
+      // 说话中累积到 rolling buffer(独立于 VAD 内部 buffer)
+      if (speakingActive) {
+        // 拷贝一份 —— audio callback 用的 Float32Array 会被复用
+        const copy = new Float32Array(samples.length);
+        copy.set(samples);
+        speakingSamples.push(copy);
+        speakingTotalLen += copy.length;
+      }
+
       buffer.push(samples);
       const windowSize = vad.config.sileroVad.windowSize;
       while (buffer.size() > windowSize) {
@@ -539,17 +597,24 @@ export function createSherpaEngine(
         vad.acceptWaveform(chunk);
         buffer.pop(windowSize);
 
-        // 状态转换:是否在说话.用于 UI "..." 提示.
+        // 状态转换.
         const nowSpeaking = vad.isDetected();
         if (nowSpeaking && !speakingActive) {
           speakingActive = true;
+          speakingSamples.length = 0;
+          speakingTotalLen = 0;
+          lastInterimAt = 0; // 重置 —— 新一句立即允许第一次 interim
           onStatus?.("speaking");
         } else if (!nowSpeaking && speakingActive) {
           speakingActive = false;
+          // 说话结束 —— 清 rolling buffer,VAD segment 会用 sherpa 内部
+          // 的完整音频跑 final(比我们外层攒的更准).
+          speakingSamples.length = 0;
+          speakingTotalLen = 0;
           onStatus?.("listening");
         }
 
-        // 有已完成的 segment 就跑 offline recognizer
+        // 有已完成的 segment 就跑 offline recognizer 出 final
         while (!vad.isEmpty()) {
           const segment = vad.front();
           vad.pop();
@@ -569,6 +634,9 @@ export function createSherpaEngine(
           }
         }
       }
+
+      // 每个 audio chunk 后尝试触发 interim(节流 400ms + busy 挡)
+      maybeInterim();
     } catch (e: any) {
       console.error("[sherpa] pipeline error:", e);
       onError?.(String(e?.message || e));
@@ -590,30 +658,24 @@ export function createSherpaEngine(
         }
 
         // 每个 engine 实例独立 vad + buffer(vad 有内部状态,共享会串音).
-        // VAD tuning(v1.4.0.013):
-        //   minSilenceDuration: 0.5s → 0.2s
-        //   minSpeechDuration:  0.25s → 0.15s
-        //
-        // 默认(0.5s 静音才判句末)在流式跳字体验上太钝 —— 用户说"你好,
-        // 今天怎么样"要等半秒静音才出第一段.压到 0.2s 后,自然停顿处
-        // 会被切成短段(比如"你好" / "今天怎么样"),视觉上像跟随;副作用
-        // 是长句被切成多段可能连贯性和上下文推理差一点,但对通话/翻译
-        // 场景一段两三个字的短语更符合口语节奏.其余 sileroVad 字段保
-        // 留 wrapper 默认(threshold 0.5 / windowSize 512 / maxSpeechDuration 20).
+        // VAD tuning:回到 sherpa 官方默认(minSilenceDuration 0.5s /
+        // minSpeechDuration 0.25s).v1.4.0.013 曾把它压到 0.2s 想靠短切段
+        // 假流式,但连贯性差;v1.4.0.014 换成 rolling interim 后不需要
+        // 短切段,还原默认让句子更完整、final 更准.
         const vadConfig = {
           sileroVad: {
             model: "./silero_vad.onnx",
             threshold: 0.5,
-            minSilenceDuration: 0.2,
-            minSpeechDuration: 0.15,
+            minSilenceDuration: 0.5,
+            minSpeechDuration: 0.25,
             maxSpeechDuration: 20,
             windowSize: 512,
           },
           tenVad: {
             model: "",
             threshold: 0.5,
-            minSilenceDuration: 0.2,
-            minSpeechDuration: 0.15,
+            minSilenceDuration: 0.5,
+            minSpeechDuration: 0.25,
             maxSpeechDuration: 20,
             windowSize: 256,
           },
@@ -626,6 +688,10 @@ export function createSherpaEngine(
         vad = w.createVad!(env.Module, vadConfig);
         buffer = new w.CircularBuffer!(30 * SAMPLE_RATE, env.Module);
         speakingActive = false;
+        speakingSamples.length = 0;
+        speakingTotalLen = 0;
+        lastInterimAt = 0;
+        interimBusy = false;
 
         audioCtx = new AudioContext({ sampleRate: SAMPLE_RATE });
         actualRate = audioCtx.sampleRate;
