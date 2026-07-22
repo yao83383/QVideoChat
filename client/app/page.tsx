@@ -1,15 +1,26 @@
 "use client";
 
+/**
+ * 首页 —— 只装匹配任务本身.
+ *
+ * IA 重写后的极简版本(v1.4.0.003):除了主 CTA 和让用户看得见自己
+ * 化身的 hero,其他一切都搬走 —— 好友入口进底部 tab,设置/资料/
+ * 语言/tag/化身/登录 全部进 /me hub,onboarding + 社区门进 /welcome.
+ *
+ * 保留:
+ *  - 化身 3D 预览(用户的"我在场"的具身表达)
+ *  - 主 CTA "开始匹配"
+ *  - 语言 + tag 一行只读摘要(点击跳 /me/language)
+ *  - 服务器连接状态指示灯
+ *  - Presence publisher(登录 + 摄像头开时把自己化身广播给好友)
+ *  - Electron pet window 桥(用了它的用户不受重构影响)
+ *  - 匿名用户首次匹配时自动 createUser
+ *  - 好友请求 toast(全局收到就显示,不局限于哪个 tab)
+ */
+
 import { useState, useEffect, useRef, useMemo } from "react";
 import { useRouter } from "next/navigation";
-import MatchButton from "@/components/MatchButton";
 import VrmAvatar from "@/components/VrmAvatar";
-import FriendList from "@/components/FriendList";
-import LoginPrompt from "@/components/LoginPrompt";
-import SettingsModal from "@/components/SettingsModal";
-import ProfileModal from "@/components/ProfileModal";
-import OnboardingWizard from "@/components/OnboardingWizard";
-import CommunityGuidelinesModal, { needsCommunityGate } from "@/components/CommunityGuidelinesModal";
 import NoCameraMatchNotice from "@/components/NoCameraMatchNotice";
 import { useFaceMesh } from "@/hooks/useFaceMesh";
 import { useSocket } from "@/hooks/useSocket";
@@ -18,18 +29,10 @@ import { useSelectedAvatar } from "@/hooks/useSelectedAvatar";
 import { useGuestName } from "@/hooks/useGuestName";
 import { useAfk } from "@/hooks/useAfk";
 import { usePresence } from "@/hooks/usePresence";
-import { AVATARS, DEFAULT_AVATAR_ID } from "@/lib/avatars";
+import { needsCommunityGate } from "@/components/CommunityGuidelinesModal";
 import { preloadSherpa } from "@/lib/ai/sherpa-engine";
 import { preloadPair } from "@/lib/ai/translate";
 import type { MatchEvents, SignalEvents } from "@/hooks/useSocket";
-
-// Rotating showcase for the "换个化身试试" banner. Pulled from AVATARS at
-// module init so the copy can never drift out of sync with the actual roster.
-const FEATURED_BANNER_NAMES = AVATARS
-  .filter((a) => a.id !== DEFAULT_AVATAR_ID)
-  .slice(0, 3)
-  .map((a) => a.name)
-  .join(" · ");
 
 const LANG_LABEL: Record<string, string> = {
   zh: "中文", en: "英文", ja: "日文", ko: "韩文",
@@ -46,54 +49,44 @@ function readLangPref(key: string, fallback: string): string {
 export default function Home() {
   const router = useRouter();
   const { user, loading: userLoading, createUser } = useUser();
-  const { guestName, regenerate: regenerateGuestName } = useGuestName();
+  const { guestName } = useGuestName();
   const [matchStatus, setMatchStatus] = useState<"idle" | "matching">("idle");
-  const [showFriends, setShowFriends] = useState(false);
-  const [selectedTags, setSelectedTags] = useState<string[]>([]);
   const [friendRequest, setFriendRequest] = useState<{ fromUserId: string; fromUsername: string } | null>(null);
   const [banMsg, setBanMsg] = useState("");
-  const [showLoginModal, setShowLoginModal] = useState(false);
-  const [showSettings, setShowSettings] = useState(false);
-  const [showProfile, setShowProfile] = useState(false);
   const [showNoCameraNotice, setShowNoCameraNotice] = useState(false);
 
-  // The "identity" the user will match under: registered username wins, else
-  // the auto-generated guest name (see memory:oc-platform-vision — every
-  // anon is a "未知'原创'角色N"). Refs keep the value fresh for callbacks
-  // that were memoized before the hook resolved.
+  // 首次访问未完成引导时把用户送到 /welcome. 老的 OnboardingWizard +
+  // CommunityGate 都改到那边渲染;这里只判断是否需要跳。
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const gate = needsCommunityGate();
+    const onboarded = localStorage.getItem("qv_onboarded") === "1";
+    if (gate || !onboarded) router.replace("/welcome");
+  }, [router]);
+
   const activeName = user?.username?.trim() || guestName;
   const activeNameRef = useRef(activeName);
   activeNameRef.current = activeName;
 
-  // Language pair — pulled at mount + refreshed when ProfileModal closes so
-  // the chip label stays honest. Persisted by LangFilterBar to qv_sl/qv_tl.
+  // Language + tags —— 只读展示,编辑入口在 /me
   const [langs, setLangs] = useState<{ sl: string; tl: string }>(() => ({
     sl: readLangPref("qv_sl", "zh"),
     tl: readLangPref("qv_tl", "en"),
   }));
-  const refreshLangsFromStorage = () =>
-    setLangs({
-      sl: readLangPref("qv_sl", "zh"),
-      tl: readLangPref("qv_tl", "en"),
-    });
-
-  // Pick avatar hero size once at mount from viewport width so mobile / desktop
-  // both fit without re-measuring on resize (VrmAvatar's WebGL effect keys on
-  // `size`, so changing it would dispose+reload the ~25MB VRM).
-  const [avatarSize] = useState(() => {
-    if (typeof window === "undefined") return 320;
-    return Math.min(window.innerWidth - 32, 360);
-  });
-
-  // Restore previously-saved tags so the chip shows accurate counts even before
-  // the user opens ProfileModal. Same key ProfileModal + RoomClient read.
+  const [selectedTags, setSelectedTags] = useState<string[]>([]);
   useEffect(() => {
+    setLangs({ sl: readLangPref("qv_sl", "zh"), tl: readLangPref("qv_tl", "en") });
     try {
       const raw = localStorage.getItem("qv_pendingTags");
       const parsed = raw ? JSON.parse(raw) : [];
       if (Array.isArray(parsed)) setSelectedTags(parsed);
     } catch { /* ignore */ }
   }, []);
+
+  const [avatarSize] = useState(() => {
+    if (typeof window === "undefined") return 320;
+    return Math.min(window.innerWidth - 32, 360);
+  });
 
   const matchEvents: MatchEvents = useMemo(
     () => ({
@@ -123,27 +116,17 @@ export default function Home() {
   );
 
   const signalEvents: SignalEvents = useMemo(
-    () => ({
-      onOffer: () => {},
-      onAnswer: () => {},
-      onIce: () => {},
-    }),
+    () => ({ onOffer: () => {}, onAnswer: () => {}, onIce: () => {} }),
     [],
   );
 
-  const { isConnected, joinMatch: _joinMatch, cancelMatch, socketRef } = useSocket(matchEvents, signalEvents);
-  void _joinMatch;
+  const { isConnected, cancelMatch, socketRef } = useSocket(matchEvents, signalEvents);
   const { blendshapeRef, poseRef, isLoaded, isCameraOn, error, step, faceFound, start, stop, toggleCamera } = useFaceMesh();
   const { selectedEntry } = useSelectedAvatar();
 
   useEffect(() => () => stop(), [stop]);
 
-  // Presence publisher (Phase 1). While the user is logged in AND the
-  // camera is on, we stream our avatar frames to the server so any friend
-  // who has the FriendList open sees us light up. AFK for 3 min (no face)
-  // → drop to 5fps + emit presence:sleeping so friends' tiles turn grey.
-  // We pass no `friendIds` here — this page is a publisher, not a
-  // subscriber; FriendList does its own usePresence for the receive side.
+  // Presence publisher(登录 + 摄像头开)
   const isAfk = useAfk(faceFound);
   const vrmPathRef = useRef<string | null>(null);
   vrmPathRef.current = selectedEntry?.vrmPath ?? null;
@@ -152,81 +135,22 @@ export default function Home() {
       user?.userId && isCameraOn
         ? { isAfk, blendshapeRef, poseRef, vrmPathRef }
         : undefined,
-    // `blendshapeRef` / `poseRef` / `vrmPathRef` are refs — their identity
-    // is stable across renders, so listing them in deps is safe.
     [user?.userId, isCameraOn, isAfk, blendshapeRef, poseRef],
   );
   usePresence([], selfPresence);
 
-  // Community-gate takes precedence over onboarding. Both are per-browser
-  // localStorage gates, resolved after the first client-side effect so SSR
-  // and initial paint agree (`null` until then).
-  const [showCommunityGate, setShowCommunityGate] = useState<boolean | null>(null);
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    setShowCommunityGate(needsCommunityGate());
-  }, []);
-
-  const [showOnboarding, setShowOnboarding] = useState<boolean | null>(null);
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    setShowOnboarding(localStorage.getItem("qv_onboarded") !== "1");
-  }, []);
-
-  const [showAvatarBanner, setShowAvatarBanner] = useState<boolean | null>(null);
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    setShowAvatarBanner(localStorage.getItem("qv_avatar_banner_hidden") !== "1");
-  }, []);
-
-  const dismissAvatarBanner = () => {
-    try {
-      localStorage.setItem("qv_avatar_banner_hidden", "1");
-      const key = "qv_avatar_banner_dismiss";
-      const n = parseInt(localStorage.getItem(key) || "0", 10) + 1;
-      localStorage.setItem(key, String(n));
-    } catch { /* ignore */ }
-    setShowAvatarBanner(false);
-  };
-
-  const openAvatarPage = () => {
-    try {
-      const key = "qv_avatar_banner_click";
-      const n = parseInt(localStorage.getItem(key) || "0", 10) + 1;
-      localStorage.setItem(key, String(n));
-    } catch { /* ignore */ }
-    router.push("/avatars");
-  };
-
-  const openAvatarFromHero = () => {
-    try {
-      const key = "qv_avatar_hero_click";
-      const n = parseInt(localStorage.getItem(key) || "0", 10) + 1;
-      localStorage.setItem(key, String(n));
-    } catch { /* ignore */ }
-    router.push("/avatars");
-  };
-
-  const completeOnboarding = () => {
-    try {
-      localStorage.setItem("qv_onboarded", "1");
-      localStorage.setItem("qv_onboarded_at", String(Date.now()));
-    } catch { /* ignore */ }
-    setShowOnboarding(false);
-  };
-
+  // 自动开摄像头(qv_onboarded 走过就默认开)
   const autoStartTriedRef = useRef(false);
   useEffect(() => {
     if (autoStartTriedRef.current) return;
     if (typeof window === "undefined") return;
     autoStartTriedRef.current = true;
     const onboarded = localStorage.getItem("qv_onboarded") === "1";
-    if (onboarded) {
-      start();
-    }
+    const cameraAuto = localStorage.getItem("qv_camera_auto");
+    if (onboarded && cameraAuto !== "0") start();
   }, [start]);
 
-  // Bridge blendshape / pose frames to the Electron pet window at ~30fps.
+  // Electron pet 桥
   useEffect(() => {
     if (typeof window === "undefined" || !window.qvHost) return;
     const host = window.qvHost;
@@ -239,19 +163,14 @@ export default function Home() {
     return () => clearInterval(iv);
   }, [blendshapeRef, poseRef]);
 
-  // Warm up ASR + translation pipelines. See historical notes on serial
-  // ordering (sherpa first, then transformers.js) preserved from v1.2.2.007.
+  // ASR + translate 预热
   const preloadedRef = useRef(false);
   useEffect(() => {
     if (preloadedRef.current) return;
     preloadedRef.current = true;
     (async () => {
-      try {
-        await preloadSherpa();
-      } catch (e) {
-        console.warn("[home] preloadSherpa failed:", e);
-        return;
-      }
+      try { await preloadSherpa(); }
+      catch (e) { console.warn("[home] preloadSherpa failed:", e); return; }
       if (langs.sl !== langs.tl) {
         try { await preloadPair(langs.sl, langs.tl); }
         catch (e) { console.warn("[home] preloadPair failed:", e); }
@@ -293,32 +212,9 @@ export default function Home() {
     if (!isCameraOn) {
       let acked = false;
       try { acked = sessionStorage.getItem("qv_no_camera_ack") === "1"; } catch { /* ignore */ }
-      if (!acked) {
-        setShowNoCameraNotice(true);
-        return;
-      }
+      if (!acked) { setShowNoCameraNotice(true); return; }
     }
     runMatch();
-  };
-
-  const handleNoCameraProceed = () => {
-    try {
-      sessionStorage.setItem("qv_no_camera_ack", "1");
-      const key = "qv_no_camera_proceed";
-      const n = parseInt(localStorage.getItem(key) || "0", 10) + 1;
-      localStorage.setItem(key, String(n));
-    } catch { /* ignore */ }
-    setShowNoCameraNotice(false);
-    runMatch();
-  };
-
-  const handleNoCameraCancel = () => {
-    try {
-      const key = "qv_no_camera_cancel";
-      const n = parseInt(localStorage.getItem(key) || "0", 10) + 1;
-      localStorage.setItem(key, String(n));
-    } catch { /* ignore */ }
-    setShowNoCameraNotice(false);
   };
 
   if (userLoading) {
@@ -329,26 +225,20 @@ export default function Home() {
     );
   }
 
+  const langLabel = `${LANG_LABEL[langs.sl] || langs.sl} → ${LANG_LABEL[langs.tl] || langs.tl}`;
+
   return (
-    <main className="relative flex min-h-screen flex-col items-center px-4 pt-6 pb-8 gap-5">
-      {/* Top-right nav — settings, profile (opens modal), friends, login */}
-      <div className="absolute top-4 right-4 flex gap-2 items-center">
+    <main className="relative flex min-h-screen flex-col items-center px-4 pt-6 pb-4 gap-5">
+      {/* 服务器连接状态 —— 唯一保留在顶栏的东西.遇上断连一眼看到. */}
+      <div className="absolute top-4 right-4 flex items-center gap-1.5">
         <span
-          className={`w-2 h-2 rounded-full ${isConnected ? "bg-green-500" : "bg-red-500"}`}
+          className={`w-2 h-2 rounded-full ${isConnected ? "bg-emerald-500" : "bg-rose-500 animate-pulse"}`}
           title={isConnected ? "已连接服务器" : "未连接服务器"}
         />
-        <MatchButton label="⚙" variant="secondary" onClick={() => setShowSettings(true)} />
-        <MatchButton label="我" variant="secondary" onClick={() => setShowProfile(true)} />
-        {user?.isRegistered ? (
-          <>
-            <MatchButton label="好友" variant="secondary" onClick={() => setShowFriends(true)} />
-            <MatchButton label="个人页" variant="secondary" onClick={() => router.push("/profile")} />
-          </>
-        ) : (
-          <MatchButton label="登录/注册" variant="secondary" onClick={() => router.push("/login")} />
-        )}
+        <span className="text-[10px] text-slate-500">{isConnected ? "在线" : "离线"}</span>
       </div>
 
+      {/* 好友请求 toast —— 全局提示,不属于任何 tab */}
       {friendRequest && (
         <div className="fixed top-4 left-1/2 -translate-x-1/2 z-40 bg-white/95 backdrop-blur-md border border-sky-200 rounded-xl px-4 py-3 shadow-lg shadow-sky-500/10 flex items-center gap-3">
           <span className="text-sm text-slate-700">
@@ -357,7 +247,7 @@ export default function Home() {
           <button
             className="rounded-lg bg-gradient-to-r from-sky-500 to-cyan-500 hover:from-sky-600 hover:to-cyan-600 text-white px-3 py-1 text-xs font-medium shadow shadow-sky-500/30"
             onClick={() => {
-              if (!user?.isRegistered) { setShowLoginModal(true); return; }
+              if (!user?.isRegistered) { router.push("/me/account"); return; }
               socketRef.current?.emit("friend:accept", {
                 fromUserId: friendRequest.fromUserId,
                 toUserId: user?.userId || "",
@@ -376,44 +266,13 @@ export default function Home() {
         </div>
       )}
 
-      {/* Compact brand */}
+      {/* 品牌头 */}
       <div className="flex flex-col items-center gap-1 mt-2">
         <h1 className="text-2xl font-bold tracking-tight text-slate-900">QVideoChat</h1>
         <p className="text-slate-500 text-[11px]">以你想要的样子,遇见世界</p>
       </div>
 
-      {/* Avatar-preview banner */}
-      {showAvatarBanner && (
-        <div className="w-full max-w-sm flex items-center gap-2 rounded-full bg-gradient-to-r from-sky-100 to-cyan-100 border border-sky-300 pl-4 pr-2 py-1.5 shadow-sm">
-          <button
-            type="button"
-            onClick={openAvatarPage}
-            className="flex-1 flex items-center gap-2 text-xs text-slate-700 hover:text-slate-900 transition"
-          >
-            <span>✨</span>
-            <span className="font-semibold">换个化身试试</span>
-            <span className="text-slate-500">{FEATURED_BANNER_NAMES}</span>
-            <span className="ml-auto text-sky-600">→</span>
-          </button>
-          <button
-            type="button"
-            onClick={dismissAvatarBanner}
-            aria-label="关闭"
-            className="w-6 h-6 rounded-full text-slate-500 hover:text-slate-900 hover:bg-slate-900/10 transition text-xs"
-          >
-            ×
-          </button>
-        </div>
-      )}
-
-      {!isConnected && matchStatus === "idle" && (
-        <div className="flex items-center gap-2 rounded-full bg-rose-100 border border-rose-300 px-3 py-1">
-          <span className="w-2 h-2 rounded-full bg-rose-500 animate-pulse" />
-          <span className="text-xs text-rose-700 font-medium">服务器未连接</span>
-        </div>
-      )}
-
-      {/* Hero avatar */}
+      {/* Hero 化身 */}
       <div className="flex flex-col items-center gap-2">
         <VrmAvatar
           blendshapeRef={blendshapeRef}
@@ -446,45 +305,28 @@ export default function Home() {
             </button>
           )}
         </div>
-        <button
-          type="button"
-          onClick={openAvatarFromHero}
-          className="group inline-flex items-center gap-1.5 rounded-full border border-slate-200 hover:border-sky-400 bg-white/80 hover:bg-white px-3 py-1 text-[11px] text-slate-700 transition shadow-sm"
-        >
-          <span className="text-slate-500">化身</span>
-          <span className="font-medium text-slate-900">{selectedEntry.name}</span>
-          <span className="text-sky-600 group-hover:text-sky-700">换一换 →</span>
-        </button>
       </div>
 
-      {/* Current-config chip. Opens ProfileModal — the single edit surface
-          for identity + language + tags. Kept subtle so the match CTA below
-          remains the visual anchor. */}
+      {/* 只读摘要 —— 一行显示身份 + 语言 + tag 数,点击去 /me */}
       <button
         type="button"
-        onClick={() => setShowProfile(true)}
+        onClick={() => router.push("/me")}
         className="group flex flex-col items-center gap-0.5 max-w-sm px-4 py-1.5 rounded-2xl bg-white/70 hover:bg-white border border-slate-200 hover:border-sky-300 shadow-sm transition"
       >
         <span className="text-[13px] text-slate-900 font-semibold truncate max-w-full">
           {user?.isRegistered ? `@${user.username}` : (activeName || "抽取中…")}
         </span>
         <span className="text-[10px] text-slate-500 flex items-center gap-2 whitespace-nowrap">
-          <span>
-            {LANG_LABEL[langs.sl] || langs.sl} → {LANG_LABEL[langs.tl] || langs.tl}
-          </span>
+          <span>{langLabel}</span>
           <span className="text-slate-300">·</span>
           <span>
-            {selectedTags.length > 0
-              ? `${selectedTags.length} 个标签`
-              : "未选标签"}
+            {selectedTags.length > 0 ? `${selectedTags.length} 个标签` : "未选标签"}
           </span>
-          <span className="text-sky-600 group-hover:text-sky-700 ml-1">
-            编辑 →
-          </span>
+          <span className="text-sky-600 group-hover:text-sky-700 ml-1">编辑 →</span>
         </span>
       </button>
 
-      {/* Primary CTA */}
+      {/* 主 CTA */}
       {matchStatus === "idle" ? (
         <button
           onClick={handleMatch}
@@ -497,59 +339,28 @@ export default function Home() {
         <div className="flex flex-col items-center gap-3">
           <div className="h-6 w-6 animate-spin rounded-full border-2 border-slate-300 border-t-sky-600" />
           <p className="text-slate-600 text-sm">正在为你连线聊伴…</p>
-          <MatchButton
-            label="取消"
-            variant="secondary"
+          <button
+            type="button"
+            className="rounded-full bg-white border border-slate-200 hover:border-sky-300 text-slate-700 px-4 py-1.5 text-xs transition"
             onClick={() => { cancelMatch(user?.userId || ""); setMatchStatus("idle"); }}
-          />
+          >
+            取消
+          </button>
         </div>
       )}
 
       {banMsg && <p className="text-rose-600 text-sm font-medium">{banMsg}</p>}
 
-      <p className="text-slate-400 text-[10px] mt-auto pt-4">
-        v{process.env.NEXT_PUBLIC_APP_VERSION || "0.0.0"}
-      </p>
-
-      <FriendList
-        isOpen={showFriends}
-        onClose={() => setShowFriends(false)}
-        currentUserId={user?.userId || ""}
-      />
-
-      <LoginPrompt show={showLoginModal} onClose={() => setShowLoginModal(false)} />
-      <SettingsModal show={showSettings} onClose={() => setShowSettings(false)} />
-
-      {/* Profile modal — identity + language + tags. Re-reads language
-          keys from localStorage on close so the chip label reflects any
-          change the LangFilterBar inside made. */}
-      <ProfileModal
-        show={showProfile}
-        onClose={() => { setShowProfile(false); refreshLangsFromStorage(); }}
-        guestName={guestName}
-        onRegenerateGuestName={regenerateGuestName}
-        registeredUsername={user?.isRegistered ? user.username || null : null}
-        selectedTags={selectedTags}
-        onTagsChange={setSelectedTags}
-      />
-
-      <OnboardingWizard
-        show={showOnboarding === true && showCommunityGate === false}
-        onComplete={completeOnboarding}
-        onOpenCamera={start}
-        onGoToAvatars={openAvatarFromHero}
-        selectedTags={selectedTags}
-        onTagsChange={setSelectedTags}
-      />
-
-      {showCommunityGate === true && (
-        <CommunityGuidelinesModal onAccept={() => setShowCommunityGate(false)} />
-      )}
-
       {showNoCameraNotice && (
         <NoCameraMatchNotice
-          onProceed={handleNoCameraProceed}
-          onCancel={handleNoCameraCancel}
+          onProceed={() => {
+            try {
+              sessionStorage.setItem("qv_no_camera_ack", "1");
+            } catch { /* ignore */ }
+            setShowNoCameraNotice(false);
+            runMatch();
+          }}
+          onCancel={() => setShowNoCameraNotice(false)}
         />
       )}
     </main>
