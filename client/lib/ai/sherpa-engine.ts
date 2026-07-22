@@ -589,8 +589,41 @@ export function createSherpaEngine(
           throw new Error("VAD/CircularBuffer wrappers missing");
         }
 
-        // 每个 engine 实例独立 vad + buffer(vad 有内部状态,共享会串音)
-        vad = w.createVad!(env.Module);
+        // 每个 engine 实例独立 vad + buffer(vad 有内部状态,共享会串音).
+        // VAD tuning(v1.4.0.013):
+        //   minSilenceDuration: 0.5s → 0.2s
+        //   minSpeechDuration:  0.25s → 0.15s
+        //
+        // 默认(0.5s 静音才判句末)在流式跳字体验上太钝 —— 用户说"你好,
+        // 今天怎么样"要等半秒静音才出第一段.压到 0.2s 后,自然停顿处
+        // 会被切成短段(比如"你好" / "今天怎么样"),视觉上像跟随;副作用
+        // 是长句被切成多段可能连贯性和上下文推理差一点,但对通话/翻译
+        // 场景一段两三个字的短语更符合口语节奏.其余 sileroVad 字段保
+        // 留 wrapper 默认(threshold 0.5 / windowSize 512 / maxSpeechDuration 20).
+        const vadConfig = {
+          sileroVad: {
+            model: "./silero_vad.onnx",
+            threshold: 0.5,
+            minSilenceDuration: 0.2,
+            minSpeechDuration: 0.15,
+            maxSpeechDuration: 20,
+            windowSize: 512,
+          },
+          tenVad: {
+            model: "",
+            threshold: 0.5,
+            minSilenceDuration: 0.2,
+            minSpeechDuration: 0.15,
+            maxSpeechDuration: 20,
+            windowSize: 256,
+          },
+          sampleRate: 16000,
+          numThreads: 1,
+          provider: "cpu",
+          debug: 0,
+          bufferSizeInSeconds: 30,
+        };
+        vad = w.createVad!(env.Module, vadConfig);
         buffer = new w.CircularBuffer!(30 * SAMPLE_RATE, env.Module);
         speakingActive = false;
 
