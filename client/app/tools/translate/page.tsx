@@ -251,39 +251,55 @@ export default function TranslatePage() {
       </header>
 
       {/* 加载状态 —— 首次进入下载 sherpa + 翻译模型.
-          - downloading 显示 percent + MB(用户看到实际进度)
-          - initializing 显示 emscripten 报的 message + 预期语(降焦虑)
+          - downloading + percent < 100 显示下载进度
+          - downloading + percent == 100(数据全到位,等 emscripten 挂载 FS) 显示 "启动引擎中..."
+          - initializing 显示 "初始化识别引擎..."
           - 长时间(>90s)initializing 显示可刷新提示 */}
       {(sherpaLoad.phase === "downloading" || sherpaLoad.phase === "initializing") && (
         <div className="mb-3 rounded-xl bg-cyan-50 border border-cyan-200 p-3">
           <p className="text-xs text-cyan-800 font-medium">
             {sherpaLoad.phase === "initializing"
               ? "初始化识别引擎..."
-              : `首次加载识别模型 ${sherpaLoad.percent > 0 ? sherpaLoad.percent + "%" : ""}`}
-            {sherpaLoad.total > 0 && sherpaLoad.phase === "downloading" && (
+              : sherpaLoad.percent >= 100
+                ? "启动引擎中..."
+                : `下载识别模型 ${sherpaLoad.percent > 0 ? sherpaLoad.percent + "%" : ""}`}
+            {sherpaLoad.total > 0 && sherpaLoad.phase === "downloading" && sherpaLoad.percent < 100 && (
               <span className="text-cyan-600 ml-1">
                 ({(sherpaLoad.loaded / 1_048_576).toFixed(1)} / {(sherpaLoad.total / 1_048_576).toFixed(0)} MB)
               </span>
             )}
           </p>
-          {/* emscripten 具体阶段(挂载文件系统、初始化 worker 等)—— 让用户知道
-              程序确实在动,不是死掉了.空 message 或与主标题重复时不显示. */}
+          {/* emscripten 底层状态 —— 只在真的能帮上忙的时候显示,不要把
+              "本地缓存加载 229MB" / "加载识别模型..." 这些自己写的
+              占位 message 又展示一遍 */}
           {sherpaLoad.message
+            && !sherpaLoad.message.startsWith("本地缓存加载")
+            && !sherpaLoad.message.startsWith("下载识别模型")
+            && !sherpaLoad.message.startsWith("加载识别模型")
             && sherpaLoad.message !== "初始化识别引擎..."
-            && sherpaLoad.message !== "加载识别模型..." && (
+            && sherpaLoad.message !== "识别就绪" && (
             <p className="text-[10px] text-cyan-700/80 mt-1 font-mono truncate">
               {sherpaLoad.message}
             </p>
           )}
           <div className="mt-2 h-1 rounded-full bg-cyan-100 overflow-hidden">
             <div
-              className={`h-full bg-cyan-500 transition-all ${sherpaLoad.phase === "initializing" ? "animate-pulse" : ""}`}
-              style={{ width: `${sherpaLoad.phase === "initializing" ? 100 : sherpaLoad.percent}%` }}
+              className={`h-full bg-cyan-500 transition-all ${
+                (sherpaLoad.phase === "initializing" || sherpaLoad.percent >= 100) ? "animate-pulse" : ""
+              }`}
+              style={{
+                width: `${
+                  sherpaLoad.phase === "initializing" || sherpaLoad.percent >= 100
+                    ? 100 : sherpaLoad.percent
+                }%`,
+              }}
             />
           </div>
-          <p className="text-[10px] text-cyan-600/70 mt-2">
-            首次约 30-60 秒 · 模型 ~200MB · 下次访问会从本地缓存直接启动
-          </p>
+          {sherpaLoad.percent < 100 && (
+            <p className="text-[10px] text-cyan-600/70 mt-2">
+              首次约 30-60 秒 · 模型 ~240MB · 下次访问会从本地缓存直接启动
+            </p>
+          )}
           {longWait && (
             <p className="text-[10px] text-amber-600 mt-1">
               等太久了?试试 <button

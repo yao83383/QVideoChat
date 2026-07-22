@@ -316,16 +316,26 @@ function ensureSherpaLoaded(): Promise<SherpaEnv> {
       M.setStatus = (status: string) => {
         console.log("[sherpa status]", JSON.stringify(status));
         if (!status) return;
+        // Phase lock: 一旦已经进入 initializing / ready / error,
+        // emscripten 后续的 setStatus 消息不再回滚 phase.历史上遇到 bug —
+        // emscripten preload 结束时会 fire 一次 "Downloading data... (X/X)"
+        // 100% 消息,如果 onRuntimeInitialized 已经 fire、我们 phase 也
+        // 已经变了 initializing,这个 setStatus 会把 phase 打回 downloading,
+        // UI 就一直卡在"首次加载识别模型 100%".
+        const p = loadState.phase;
+        const phaseLocked = p === "initializing" || p === "ready" || p === "error";
         const m = status.match(/Downloading data\.\.\. \((\d+)\/(\d+)\)/);
         if (m) {
-          updateLoadState({
-            phase: "downloading",
+          const patch: Partial<SherpaLoadState> = {
             loaded: Number(m[1]),
             total: Number(m[2]),
             message: status,
-          });
+          };
+          if (!phaseLocked) patch.phase = "downloading";
+          updateLoadState(patch);
           return;
         }
+        // 非下载消息(比如 "Running..." / "Ready.")—— 只更 message.
         updateLoadState({ message: status });
       };
       M.print = (msg: string) => console.log("[sherpa print]", msg);
