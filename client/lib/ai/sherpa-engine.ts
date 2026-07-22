@@ -259,6 +259,53 @@ async function loadScript(src: string): Promise<void> {
   });
 }
 
+/**
+ * fetch sherpa-onnx-{asr,vad}.js 的源码,自己 append `window.X = X;`
+ * 挂上关键 class,然后 script tag inject.
+ *
+ * 需要这么绕的原因:v1.13.2 的 wrapper 在浏览器分支不 export 到 window
+ * (只 Node.js 分支 module.exports).class 声明在 script 顶级会进 script
+ * realm 的 lexical bindings,indirect eval 也拿不到.唯一稳的方法是自己
+ * 拼接源码里加一句"暴露"再 eval.
+ *
+ * 这个 fn 幂等 —— 每个 URL 只 inject 一次,重复调直接 return.
+ */
+const injected = new Set<string>();
+async function loadScriptWithExports(url: string, exportNames: string[]): Promise<void> {
+  if (injected.has(url)) return;
+  const resp = await fetch(url, { credentials: "omit" });
+  if (!resp.ok) throw new Error(`fetch ${url} failed: ${resp.status}`);
+  const src = await resp.text();
+  const shim = exportNames
+    .map((n) => `if (typeof ${n} !== 'undefined') window.${n} = ${n};`)
+    .join(" ");
+  const full = `${src}\n;(function(){${shim}})();`;
+  return new Promise((resolve, reject) => {
+    try {
+      // Blob URL 传给 script tag,而不是 inline text — inline text 在
+      // 有严格 CSP 的环境会被拒;blob: 通常允许.
+      const blob = new Blob([full], { type: "application/javascript" });
+      const blobUrl = URL.createObjectURL(blob);
+      const s = document.createElement("script");
+      s.src = blobUrl;
+      s.async = true;
+      s.dataset.sherpa = url;
+      s.onload = () => {
+        URL.revokeObjectURL(blobUrl);
+        injected.add(url);
+        resolve();
+      };
+      s.onerror = () => {
+        URL.revokeObjectURL(blobUrl);
+        reject(new Error(`inject failed for ${url}`));
+      };
+      document.head.appendChild(s);
+    } catch (e) {
+      reject(e);
+    }
+  });
+}
+
 function ensureSherpaLoaded(): Promise<SherpaEnv> {
   if (envPromise) return envPromise;
   if (typeof window === "undefined") {
@@ -273,8 +320,20 @@ function ensureSherpaLoaded(): Promise<SherpaEnv> {
     let dataBlobUrl: string | null = null;
     try {
       // 1) OfflineRecognizer + VAD + CircularBuffer wrappers.
-      await loadScript(`${base}/sherpa-onnx-asr.js`);
-      await loadScript(`${base}/sherpa-onnx-vad.js`);
+      // 用 loadScriptWithExports —— fetch 源码后自己 append `window.X = X`
+      // 再 inject.绕过 v1.13.2 上游 wrapper 不 export 到浏览器 window
+      // 的漏洞;和"public/sherpa-asr/sherpa-onnx-*.js 结尾手改的 4 行
+      // patch"效果等价,但不依赖服务器上文件的补丁状态,也不吃浏览器对
+      // 老 asr.js 的 immutable 缓存 —— fetch 每次都会走(浏览器有权
+      // conditional GET 但 body 一样).
+      await loadScriptWithExports(
+        `${base}/sherpa-onnx-asr.js`,
+        ["OfflineRecognizer", "createOnlineRecognizer"],
+      );
+      await loadScriptWithExports(
+        `${base}/sherpa-onnx-vad.js`,
+        ["createVad", "CircularBuffer", "Vad"],
+      );
 
       // 2) Resolve the ~240MB .data payload via OPFS (memory-speed once cached).
       dataBlobUrl = await resolveDataBlobUrl(`${base}/sherpa-onnx-wasm-main-vad-asr.data`);
