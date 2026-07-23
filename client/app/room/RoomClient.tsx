@@ -21,9 +21,8 @@ import { usePeer } from "@/hooks/usePeer";
 import { useSocket } from "@/hooks/useSocket";
 import { useTranscriptBuffer } from "@/hooks/useTranscriptBuffer";
 import { reportUser } from "@/lib/api";
-import { createSherpaEngine, preloadSherpa, onSherpaLoadChange, type SherpaLoadState } from "@/lib/ai/sherpa-engine";
+import { createSherpaEngine, preloadSherpa } from "@/lib/ai/sherpa-engine";
 import { translateText, preloadPair } from "@/lib/ai/translate";
-import { onLoadingChange } from "@/lib/ai";
 import type { MatchEvents, SignalEvents } from "@/hooks/useSocket";
 
 function loadPref<T>(key: string, fallback: T): T {
@@ -87,16 +86,14 @@ export default function RoomClient() {
   // 更多菜单里 toggle.
   const [selfMirrored, setSelfMirrored] = useState(true);
   const [showMoreMenu, setShowMoreMenu] = useState(false);
-  const [translating, setTranslating] = useState(false);
-  const [modelLoading, setModelLoading] = useState(false);
-  const [modelProgress, setModelProgress] = useState(0);
-  const [modelBytes, setModelBytes] = useState<{ loaded: number; total: number }>({ loaded: 0, total: 0 });
-  const [translateError, setTranslateError] = useState<string | null>(null);
-  const [asrError, setAsrError] = useState<string | null>(null);
-  const [asrStatus, setAsrStatus] = useState<string>("idle");
-  const [sherpaLoad, setSherpaLoad] = useState<SherpaLoadState>({
-    phase: "idle", loaded: 0, total: 0, percent: 0,
-  });
+  // 保留 translating —— pipeline 里 setTranslating true/false,虽然当前
+  // UI 层没消费,但保留 hook 便于以后加"正在翻译..."的 subtitle 指示.
+  const [, setTranslating] = useState(false);
+  const [, setTranslateError] = useState<string | null>(null);
+  const [, setAsrError] = useState<string | null>(null);
+  // asrStatus / sherpaLoad / modelLoading / modelProgress / modelBytes 全部
+  // 删除:通话页新 UI (SubtitleOverlay + CallToolbar) 不消费,历史 subtitle
+  // 侧栏面板早已删,再没消费者.省 6 个 useState + 3 个 useEffect 的开销.
 
   const { blendshapeRef, poseRef, isLoaded, isCameraOn, error: camError, step: camStep, faceFound, start, stop, toggleCamera } = useFaceMesh();
   const { selectedEntry } = useSelectedAvatar();
@@ -334,40 +331,16 @@ export default function RoomClient() {
   }, [peer.remoteAudioStream]);
 
   // --- AI Translation Pipeline ---
+  //
+  // 老通话页曾在 my/peer avatar 下面渲染 sherpa/transformers 加载进度条
+  // (modelLoading/modelProgress/modelBytes/sherpaLoad),v1.4.0.004 换新
+  // 通话页 UI 后那个面板整个被删,进度 UI 全部消失.只保留 preload 副作用
+  // (sherpa/transformers 提前 warm cache),不再消费加载状态.
+  //
+  // 未来若想在通话页也加"首次加载" hint,可以复用 /tools/translate 的
+  // onSherpaLoadChange + onLoadingChange 订阅模式.
 
-  // Track transformers.js model loading so we can show a hint instead of a
-  // silent "translating..." while ~78MB downloads. Aggregates progress across
-  // all pipeline files for the ACTIVE language pair(s).
-  useEffect(() => {
-    return onLoadingChange((s) => {
-      const activePairs = Array.from(s.active);
-      setModelLoading(activePairs.length > 0);
-
-      // Aggregate loaded/total across all in-flight pairs.
-      let loaded = 0;
-      let total = 0;
-      for (const p of activePairs) {
-        const st = s.pairs[p];
-        if (!st) continue;
-        loaded += st.loaded;
-        total += st.total;
-      }
-      // If nothing is active but a recently-loaded pair is present, use it for
-      // the "done" flash (100%).
-      if (total === 0 && Object.keys(s.pairs).length > 0) {
-        for (const p of Object.values(s.pairs)) {
-          loaded += p.loaded;
-          total += p.total;
-        }
-      }
-      setModelBytes({ loaded, total });
-      setModelProgress(total > 0 ? Math.min(100, Math.round((loaded / total) * 100)) : 0);
-    });
-  }, []);
-
-  // Preload translation model(s) as soon as translation is enabled OR the pair
-  // changes. This is the biggest single win for perceived latency — the first
-  // spoken sentence no longer waits on a cold-start download.
+  // 翻译 pair 预载 —— translate 开或语言对变时提前 warm transformers.js.
   useEffect(() => {
     if (!translateEnabled) return;
     if (sourceLang === targetLang) return;
@@ -379,8 +352,9 @@ export default function RoomClient() {
     });
   }, [translateEnabled, sourceLang, targetLang]);
 
-  // Kick off the sherpa-onnx WASM bundle download the moment we hit the
-  // room —— ASR 常跑,不受字幕/翻译按钮控制;209MB 只下一次(浏览器缓存).
+  // Sherpa VAD+SenseVoice bundle 一进 room 就 warm cache(OPFS hit 秒开,
+  // 首次约 30-60 秒 240MB).ASR 常跑不受字幕按钮控制,提前 warm 保证
+  // 用户按下 subtitle 时无冷启动.
   useEffect(() => {
     console.log('[room] preloadSherpa');
     preloadSherpa().catch((e) => {
@@ -388,11 +362,6 @@ export default function RoomClient() {
       setAsrError(`识别模型加载失败: ${e?.message || e}`);
     });
   }, []);
-
-  // Subscribe to sherpa download/init progress so we can show a real progress
-  // bar in the subtitle panel instead of a mysterious "starting..." spinner
-  // while ~209MB fetches.
-  useEffect(() => onSherpaLoadChange(setSherpaLoad), []);
 
   // Send-side pipeline: mic → Web Speech (interim + final) → translate → peer.
   // ASR only depends on subtitleEnabled + peer connected + sourceLang.
@@ -411,11 +380,9 @@ export default function RoomClient() {
       setMySourceText(null);
       setMyTranslatedText(null);
       setAsrError(null);
-      setAsrStatus("idle");
       return;
     }
     setAsrError(null);
-    setAsrStatus("starting");
 
     const stream = peer.localAudioStream;
     if (!stream) {
@@ -497,7 +464,6 @@ export default function RoomClient() {
       (status) => {
         if (cancelled) return;
         console.log("[asr status]", status);
-        setAsrStatus(status);
       },
     );
 
